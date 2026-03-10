@@ -1,6 +1,6 @@
 # Router: POST /data
 #   - Receives energy frame payloads posted by an ESP32.
-#   - Validates the incoming JSON.
+#   - Validates the incoming payload.
 #   - Persists the frame to db.
 #   - Frames are stored by their ECU reported timestamp, not server receive time,
 #     so that frames buffered on the ESP32 during a disconnection are stored in
