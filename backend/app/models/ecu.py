@@ -11,4 +11,4 @@
 #   firmware_version  - string, version string reported by the ECU on each data post
 #
 # Derived and is computed (not a column):
-#   is_connected      - bool, True if last_seen is within 10 seconds
+#   is_connected      - bool, True if last_seen is within 10 seconds (example)
