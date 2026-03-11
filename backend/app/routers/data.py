@@ -8,5 +8,5 @@
 #   - Detect power limit breaches
 #   - Push the new frame to WebSocket clients on that ECU's channel.
 #   - Should handle at least 100 Hz per connected ESP32.
-#   - Data must be stored and displayed at at least 0.2 Hz (one frame per 5 seconds).
+#   - Data must be stored and displayed at at least 10 Hz
 #   - Greater than 100 Hz ADC sampling on the ESP32 is averaged before posting.
