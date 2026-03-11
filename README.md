@@ -80,9 +80,9 @@ ESP32 POST body:
 {
   "ecu_serial": 12345,
   "timestamp": "2026-03-10T09:00:00.000Z",
-  "avg_voltage": 48.2,
-  "avg_current": 12.5,
-  "energy": 0.603
+  "sample_rate" : 100hz
+  "voltage": [3012, 3008, 3015.....]
+  "current": [2187, 2190, 2184....]
 }
 ```
 
