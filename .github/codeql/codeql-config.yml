@@ -1,0 +1,12 @@
+name: "CodeQL Config"
+
+queries:
+  - uses: security-extended
+
+paths:
+  - backend/app
+  - frontend/src
+
+paths-ignore:
+  - backend/tests
+  - node_modules

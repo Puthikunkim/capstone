@@ -1,0 +1,144 @@
+name: PR pipeline
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  VITE_API_URL: http://localhost:8000
+  VITE_WS_URL: ws://localhost:8000
+
+
+jobs:
+  md_linter:
+    name: Lint docs
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout markdown
+        uses: actions/checkout@v4
+
+      - name: Lint markdown
+        uses: DavidAnson/markdownlint-cli2-action@v22.0.0
+        with:
+          config: '.markdownlint.yaml'
+          globs: "*.md"
+
+  link_checker:
+    name: Link checker
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout markdown
+        uses: actions/checkout@v4
+      - name: Restore lychee cache
+        uses: actions/cache@v5.0.3
+        with:
+          path: .lycheecache
+          key: cache-lychee-${{ github.sha }}
+          restore-keys: cache-lychee-
+
+      - name: Link Checker
+        uses: lycheeverse/lychee-action@v2.8.0
+        with:
+          args: >-
+            --no-progress
+            --max-retries 1
+            --retry-wait-time 10
+            --cache
+            '*.md'
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  server_unit_tests:
+    name: Server unit tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: pip install flake8 && flake8 .
+
+      - name: Unit test
+        run: pytest
+
+  frontend_lint:
+    name: Frontend lint
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend  
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+
+  codeql:
+    name: Analyze with codeql
+    runs-on: ubuntu-24.04
+    needs: [server_unit_tests, frontend_lint]
+    permissions:
+      security-events: write
+
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4.31.9
+        with:
+          languages: 'javascript, python'
+          config-file: ./.github/codeql/codeql-config.yml
+          # If you wish to specify custom queries, you can do so here or in a config file.
+          # By default, queries listed here will override any specified in a config file.
+          # Prefix the list here with "+" to use these queries and those in the config file.
+
+      - name: CodeQL autobuild
+        uses: github/codeql-action/autobuild@v4.31.9
+
+      - name: Perform vulnerability analysis
+        uses: github/codeql-action/analyze@v4.31.9
+
+
+  

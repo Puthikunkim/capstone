@@ -1,6 +1,6 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/IjV0HRak)
-
 # EVolocity ECU Dashboard - Software Component
+
+[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/IjV0HRak)
 
 Browser based real time dashboard for the EVolocity Control Unit (ECU) wireless data system.  
 The system wirelessly collects energy data from ESP32 based ECUs mounted on EVolocity vehicles and displays it live in a browser.
@@ -48,7 +48,7 @@ Each EVolocity vehicle carries an ECU that records voltage, current, and energy 
 
 ## Communication Flow
 
-```
+```text
 ┌─────────────────────────┐        HTTPS POST /data         ┌────────────────────────────────┐
 │  ESP32 (ECU board #1)   │ ──────────────────────────────► │                                │
 └─────────────────────────┘       ≥ 100 Hz, JSON payload    │   FastAPI Backend (Python)     │
@@ -103,7 +103,7 @@ WebSocket message pushed to browser:
 
 ## Project Structure
 
-```
+```text
 capstone-project-software-team-6/
 ├── README.md
 ├── SBOM.md
@@ -193,7 +193,7 @@ capstone-project-software-team-6/
 
 Use the conventional commits format for consistency:
 
-```
+```text
 <type>: <short summary>
 
 type = feat | fix | test | chore | docs | refactor
