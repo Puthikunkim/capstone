@@ -6,7 +6,7 @@ R16 0 N004 1k
 R8 N001 N002 1k
 R13 N002 N003 1k
 C2 N003 0 100n
-V1 Vbat 0 60
+V1 Vbat 0 -60
 V2 5V 0 5
 I1 0 Ibat 3
 X§U2 N005 N001 5V 0 N002 level1 Avol=1Meg GBW=10Meg Vos=0 En=0 Enk=0 In=0 Ink=0 Rin=500Meg
