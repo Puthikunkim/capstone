@@ -23,5 +23,5 @@ class Alert(Base):
 	limit_watts: Mapped[float] = mapped_column(Float, nullable=False)
 	frame_id: Mapped[int] = mapped_column(ForeignKey("energy_frames.id", ondelete="CASCADE"), nullable=False, index=True) # Indexed for potential queries joining alerts to frames
 
-	ecu = relationship("ECU", back_populates="alerts") # Alerts belong to an ECU
-	frame = relationship("EnergyFrame", back_populates="alerts") # Alerts are triggered by a specific energy frame, so we link them directly for easy access to frame data when analysing alerts
+	ecu = relationship("ECU", back_populates="alerts") # Alerts belong to an ECU, this field doesn't exist in the db
+	frame = relationship("EnergyFrame", back_populates="alerts") # Alerts are triggered by a specific energy frame, so we link them directly for easy access to frame data when analysing alerts,this field doesn't exist in the db
