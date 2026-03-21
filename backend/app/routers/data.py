@@ -11,3 +11,39 @@
 #   - Should handle at least 100 Hz per connected ESP32.
 #   - Data must be stored and displayed at at least 10 Hz
 #   - Greater than 100 Hz ADC sampling on the ESP32 is averaged before posting.
+
+import logging
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.schemas.energy_frame import EnergyFrameIngest, EnergyFrameResponse
+from app.services.broadcast import manager
+from app.services.processing import convert_current_and_average, convert_voltage_and_average
+from app.services.storage import check_and_record_alert, save_frame
+
+router = APIRouter(tags=["data"])
+
+logger = logging.getLogger(__name__)
+
+
+@router.post("/data", response_model=EnergyFrameResponse)
+async def ingest_frame(payload: EnergyFrameIngest, db: Session = Depends(get_db)):
+    processed = {
+        "ecu_serial": payload.ecu_serial,
+        "timestamp": payload.timestamp,
+        "avg_voltage": convert_voltage_and_average(payload.voltage_samples),
+        "avg_current": convert_current_and_average(payload.current_samples),
+        "energy": payload.energy,
+    }
+
+    frame = save_frame(db, processed)
+    alert = check_and_record_alert(db, frame, ecu=None)
+
+    await manager.notify(f"ecu_{frame.ecu_id}", EnergyFrameResponse.model_validate(frame).model_dump())
+
+    if alert:
+        await manager.notify_alert(alert)
+
+    return frame

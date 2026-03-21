@@ -7,7 +7,17 @@
 #   power_watts  - float, measured power at the time of breach
 #   limit_watts  - float, the configured limit that was exceeded
 #   frame_id     - int, the energy frame that triggered this alert
-#
-# AlertListResponse - paginated wrapper returned by GET /alerts:
-#   items  - list[AlertResponse]
-#   total  - int
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class AlertResponse(BaseModel):
+    id: int
+    ecu_id: int
+    timestamp: datetime
+    power_watts: float
+    limit_watts: float
+    frame_id: int
+
+    model_config = {"from_attributes": True}
