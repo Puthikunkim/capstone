@@ -5,3 +5,13 @@
 //   - Renders notification panel component persistently at the app level so power limit breach
 //     alerts are visible on every page, not just the dashboard.
 //   - Acts as the top level provider for any shared application state.
+
+import { Dashboard } from "./pages/Dashboard";
+
+export default function App() {
+  return (
+    <div className="app">
+      <Dashboard />
+    </div>
+  );
+}
