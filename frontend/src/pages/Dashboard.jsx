@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { ECUSelector } from "../components/ECUSelector";
+import { EnergyChart } from "../components/EnergyChart";
 import { fetchEcus } from "../api/http";
 import WebSocketClient from "../api/websocket";
 
@@ -17,6 +18,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [liveData, setLiveData] = useState(null);
+  const [chartData, setChartData] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef(null);
 
@@ -56,8 +58,9 @@ export function Dashboard() {
       const client = new WebSocketClient(
         wsUrl,
         (data) => {
-          // On message
+          // On message - update live data and add to chart buffer
           setLiveData(data);
+          setChartData((prev) => [...prev, data]);
         },
         () => {
           // On connect
@@ -111,19 +114,23 @@ export function Dashboard() {
       />
 
       {selectedEcuId && (
-        <div className="data-display">
-          {liveData ? (
-            <div className="live-data">
-              <p><strong>ECU ID:</strong> {liveData.ecu_id}</p>
-              <p><strong>Timestamp:</strong> {liveData.timestamp}</p>
-              <p><strong>Voltage:</strong> {liveData.avg_voltage?.toFixed(2)} V</p>
-              <p><strong>Current:</strong> {liveData.avg_current?.toFixed(2)} A</p>
-              <p><strong>Energy:</strong> {liveData.energy?.toFixed(4)} kWh</p>
-            </div>
-          ) : (
-            <p className="waiting-text">Waiting for data...</p>
-          )}
-        </div>
+        <>
+          <div className="data-display">
+            {liveData ? (
+              <div className="live-data">
+                <p><strong>ECU ID:</strong> {liveData.ecu_id}</p>
+                <p><strong>Timestamp:</strong> {liveData.timestamp}</p>
+                <p><strong>Voltage:</strong> {liveData.avg_voltage?.toFixed(2)} V</p>
+                <p><strong>Current:</strong> {liveData.avg_current?.toFixed(2)} A</p>
+                <p><strong>Energy:</strong> {liveData.energy?.toFixed(4)} kWh</p>
+              </div>
+            ) : (
+              <p className="waiting-text">Waiting for data...</p>
+            )}
+          </div>
+
+          {chartData.length > 0 && <EnergyChart data={chartData} />}
+        </>
       )}
 
       {ecuList.length === 0 && <p>No ECUs available</p>}

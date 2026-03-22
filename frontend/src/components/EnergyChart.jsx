@@ -1,1 +1,148 @@
-// EnergyChart component is for real time line chart of energy frame data.
+// EnergyChart component displays real-time line charts for voltage, current, and energy.
+// Uses Recharts to visualize data with separate Y-axes for each metric.
+
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+
+export function EnergyChart({ data }) {
+  if (!data || data.length === 0) {
+    return <div className="energy-chart"><p>No data to display</p></div>;
+  }
+
+  // Format timestamp for X-axis display (HH:MM:SS)
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  // Prepare data with formatted timestamps
+  const chartData = data.map((point) => ({
+    ...point,
+    time: formatTime(point.timestamp),
+  }));
+
+  return (
+    <div className="energy-chart">
+      {/* Voltage Chart */}
+      <div className="chart-container">
+        <h3>Voltage (V)</h3>
+        <ResponsiveContainer width="100%" height={250}>
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              dataKey="time"
+              tick={{ fontSize: 12 }}
+              interval={Math.max(0, Math.floor(chartData.length / 6))}
+            />
+            <YAxis
+              label={{ value: "Voltage (V)", angle: -90, position: "insideLeft" }}
+              domain={[40, 42]}
+              tickFormatter={(value) => value.toFixed(2)}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                padding: "8px",
+              }}
+              formatter={(value) => [value?.toFixed(2) + " V", "Voltage"]}
+            />
+            <Legend />
+            <Line
+              type="monotone"
+              dataKey="avg_voltage"
+              stroke="#1976d2"
+              dot={false}
+              strokeWidth={2}
+              isAnimationActive={false}
+              name="Avg Voltage"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Current Chart */}
+      <div className="chart-container">
+        <h3>Current (A)</h3>
+        <ResponsiveContainer width="100%" height={250}>
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              dataKey="time"
+              tick={{ fontSize: 12 }}
+              interval={Math.max(0, Math.floor(chartData.length / 6))}
+            />
+            <YAxis
+              label={{ value: "Current (A)", angle: -90, position: "insideLeft" }}
+              domain={[-3.5, -2.5]}
+              tickFormatter={(value) => value.toFixed(2)}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                padding: "8px",
+              }}
+              formatter={(value) => [value?.toFixed(2) + " A", "Current"]}
+            />
+            <Legend />
+            <Line
+              type="monotone"
+              dataKey="avg_current"
+              stroke="#ff9800"
+              dot={false}
+              strokeWidth={2}
+              isAnimationActive={false}
+              name="Avg Current"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Energy Chart */}
+      <div className="chart-container">
+        <h3>Energy (kWh)</h3>
+        <ResponsiveContainer width="100%" height={250}>
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              dataKey="time"
+              tick={{ fontSize: 12 }}
+              interval={Math.max(0, Math.floor(chartData.length / 6))}
+            />
+            <YAxis
+              label={{ value: "Energy (kWh)", angle: -90, position: "insideLeft" }}
+              domain={[-3.15, -2.95]}
+              tickFormatter={(value) => value.toFixed(2)}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: "#fff",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                padding: "8px",
+              }}
+              formatter={(value) => [value?.toFixed(4) + " kWh", "Energy"]}
+            />
+            <Legend />
+            <Line
+              type="monotone"
+              dataKey="energy"
+              stroke="#4caf50"
+              dot={false}
+              strokeWidth={2}
+              isAnimationActive={false}
+              name="Energy"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
