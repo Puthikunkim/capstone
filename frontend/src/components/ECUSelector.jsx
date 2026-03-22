@@ -12,7 +12,7 @@ export function ECUSelector({ ecuList, selectedEcuId, onEcuChange }) {
         <option value="">-- Choose an ECU --</option>
         {ecuList.map((ecu) => (
           <option key={ecu.id} value={ecu.id}>
-            {ecu.name || `ECU ${ecu.id}`} (Serial: {ecu.serial})
+            {ecu.name || `ECU ${ecu.id}`} (Serial Number: {ecu.serial_number})
           </option>
         ))}
       </select>

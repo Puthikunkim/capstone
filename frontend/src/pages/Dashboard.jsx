@@ -3,27 +3,28 @@
 //   - Renders the full dashboard layout including chart
 //   - Fetches ECU list from backend API
 //   - Displays ECU selector dropdown
+//   - Connects to WebSocket for selected ECU
+//   - Displays live data as text
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ECUSelector } from "../components/ECUSelector";
-
-const API_URL = "http://localhost:8000/api";
+import { fetchEcus } from "../api/http";
+import WebSocketClient from "../api/websocket";
 
 export function Dashboard() {
   const [ecuList, setEcuList] = useState([]);
   const [selectedEcuId, setSelectedEcuId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [liveData, setLiveData] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const wsRef = useRef(null);
 
   // Fetch ECUs from backend on component mount
   useEffect(() => {
-    const fetchEcus = async () => {
+    const loadEcus = async () => {
       try {
-        const response = await fetch(`${API_URL}/ecu`);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch ECUs: ${response.statusText}`);
-        }
-        const ecus = await response.json();
+        const ecus = await fetchEcus();
         setEcuList(ecus);
 
         // Auto-select first ECU if available
@@ -38,8 +39,49 @@ export function Dashboard() {
       }
     };
 
-    fetchEcus();
+    loadEcus();
   }, []);
+
+  // Connect to WebSocket when ECU is selected
+  useEffect(() => {
+    // Close previous connection
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // Connect to new ECU
+    if (selectedEcuId) {
+      const wsUrl = `ws://localhost:8000/ws/${selectedEcuId}`;
+      const client = new WebSocketClient(
+        wsUrl,
+        (data) => {
+          // On message
+          setLiveData(data);
+        },
+        () => {
+          // On connect
+          setIsConnected(true);
+        },
+        () => {
+          // On disconnect
+          setIsConnected(false);
+        }
+      );
+      client.connect();
+      wsRef.current = client;
+    }
+
+    // Cleanup on unmount or when selectedEcuId changes
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setIsConnected(false);
+      setLiveData(null);
+    };
+  }, [selectedEcuId]);
 
   const handleEcuChange = (ecuId) => {
     setSelectedEcuId(ecuId);
@@ -55,13 +97,35 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <h1>Dashboard</h1>
+      <div className="dashboard-header">
+        <h1>ECU Dashboard</h1>
+        <div className={`status ${isConnected ? "connected" : "disconnected"}`}>
+          {isConnected ? "● Connected" : "● Disconnected"}
+        </div>
+      </div>
+
       <ECUSelector
         ecuList={ecuList}
         selectedEcuId={selectedEcuId}
         onEcuChange={handleEcuChange}
       />
-      {selectedEcuId && <p>Selected ECU ID: {selectedEcuId}</p>}
+
+      {selectedEcuId && (
+        <div className="data-display">
+          {liveData ? (
+            <div className="live-data">
+              <p><strong>ECU ID:</strong> {liveData.ecu_id}</p>
+              <p><strong>Timestamp:</strong> {liveData.timestamp}</p>
+              <p><strong>Voltage:</strong> {liveData.avg_voltage?.toFixed(2)} V</p>
+              <p><strong>Current:</strong> {liveData.avg_current?.toFixed(2)} A</p>
+              <p><strong>Energy:</strong> {liveData.energy?.toFixed(4)} kWh</p>
+            </div>
+          ) : (
+            <p className="waiting-text">Waiting for data...</p>
+          )}
+        </div>
+      )}
+
       {ecuList.length === 0 && <p>No ECUs available</p>}
     </div>
   );
