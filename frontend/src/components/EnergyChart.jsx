@@ -1,6 +1,7 @@
 // EnergyChart component displays real-time line charts for voltage, current, and energy.
 // Uses Recharts to visualize data with separate Y-axes for each metric.
 
+import PropTypes from 'prop-types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 export function EnergyChart({ data }) {
@@ -146,3 +147,7 @@ export function EnergyChart({ data }) {
     </div>
   );
 }
+
+EnergyChart.propTypes = {
+  data: PropTypes.array.isRequired,
+};

@@ -1,5 +1,7 @@
 // ECUSelector component is for dropdown to switch between connected ESP32 boards.
 
+import PropTypes from 'prop-types';
+
 export function ECUSelector({ ecuList, selectedEcuId, onEcuChange }) {
   return (
     <div className="ecu-selector">
@@ -19,3 +21,9 @@ export function ECUSelector({ ecuList, selectedEcuId, onEcuChange }) {
     </div>
   );
 }
+
+ECUSelector.propTypes = {
+  ecuList: PropTypes.array.isRequired,
+  selectedEcuId: PropTypes.number,
+  onEcuChange: PropTypes.func.isRequired,
+};
