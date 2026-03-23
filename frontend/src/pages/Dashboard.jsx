@@ -6,21 +6,19 @@
 //   - Connects to WebSocket for selected ECU
 //   - Displays live data as text
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { ECUSelector } from "../components/ECUSelector";
 import { EnergyChart } from "../components/EnergyChart";
 import { fetchEcus } from "../api/http";
-import WebSocketClient from "../api/websocket";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 export function Dashboard() {
   const [ecuList, setEcuList] = useState([]);
   const [selectedEcuId, setSelectedEcuId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [liveData, setLiveData] = useState(null);
   const [chartData, setChartData] = useState([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef(null);
+  const { isConnected, liveData } = useWebSocket(selectedEcuId);
 
   // Fetch ECUs from backend on component mount
   useEffect(() => {
@@ -44,46 +42,16 @@ export function Dashboard() {
     loadEcus();
   }, []);
 
-  // Connect to WebSocket when ECU is selected
+  // Append new websocket points to chart buffer.
   useEffect(() => {
-    // Close previous connection
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
+    if (liveData) {
+      setChartData((prev) => [...prev, liveData]);
     }
+  }, [liveData]);
 
-    // Connect to new ECU
-    if (selectedEcuId) {
-      const wsUrl = `ws://localhost:8000/ws/${selectedEcuId}`;
-      const client = new WebSocketClient(
-        wsUrl,
-        (data) => {
-          // On message - update live data and add to chart buffer
-          setLiveData(data);
-          setChartData((prev) => [...prev, data]);
-        },
-        () => {
-          // On connect
-          setIsConnected(true);
-        },
-        () => {
-          // On disconnect
-          setIsConnected(false);
-        }
-      );
-      client.connect();
-      wsRef.current = client;
-    }
-
-    // Cleanup on unmount or when selectedEcuId changes
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setIsConnected(false);
-      setLiveData(null);
-    };
+  // Reset chart when switching to a different ECU.
+  useEffect(() => {
+    setChartData([]);
   }, [selectedEcuId]);
 
   const handleEcuChange = (ecuId) => {
