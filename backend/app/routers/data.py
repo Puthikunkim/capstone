@@ -41,7 +41,7 @@ async def ingest_frame(payload: EnergyFrameIngest, db: Session = Depends(get_db)
     frame = save_frame(db, processed)
     alert = check_and_record_alert(db, frame, ecu=None)
 
-    await manager.notify(f"ecu_{frame.ecu_id}", EnergyFrameResponse.model_validate(frame).model_dump())
+    await manager.notify(f"ecu_{frame.ecu_id}", EnergyFrameResponse.model_validate(frame).model_dump(mode="json"))
 
     if alert:
         await manager.notify_alert(alert)
