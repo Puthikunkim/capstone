@@ -46,18 +46,5 @@ export async function fetchEcu(ecuId) {
  * @returns {Promise<object>} ECU's historical data
  */
 export async function fetchEcuHistory(ecuId) {
-    // MOCK DATA for now
-//   return generateMockHistory(ecuId);
    return fetchApi(`/ecu/${ecuId}/history`);
 }
-
-// function generateMockHistory() {
-//   const now = Date.now();
-
-//   return Array.from({ length: 50 }).map((_, i) => ({
-//     timestamp: new Date(now - (50 - i) * 1000).toISOString(),
-//     avg_voltage: 41 + Math.random() * 0.5,
-//     avg_current: -3 + (Math.random() - 0.5) * 0.2,
-//     energy: -3 + (Math.random() - 0.5) * 0.05,
-//   }));
-// }
