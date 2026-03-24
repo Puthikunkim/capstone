@@ -3,36 +3,31 @@
 //   - Renders the full dashboard layout including chart
 //   - Fetches ECU list from backend API
 //   - Displays ECU selector dropdown
-//   - Connects to WebSocket for selected ECU
+//   - Connects to WebSocket for selected ECU (via hook)
 //   - Displays live data as text
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { ECUSelector } from "../components/ECUSelector";
 import { EnergyChart } from "../components/EnergyChart";
-import { fetchEcus } from "../api/http";
-import { fetchEcuHistory } from "../api/http";
-import WebSocketClient from "../api/websocket";
-
+import { fetchEcus, fetchEcuHistory } from "../api/http";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 export function Dashboard() {
   const [ecuList, setEcuList] = useState([]);
   const [selectedEcuId, setSelectedEcuId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [liveData, setLiveData] = useState(null);
   const [chartData, setChartData] = useState([]);
-  const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef(null);
+  const { isConnected, liveData } = useWebSocket(selectedEcuId);
 
-  // Fetch ECUs from backend on component mount
+  // Fetch ECUs on mount
   useEffect(() => {
     const loadEcus = async () => {
       try {
         const ecus = await fetchEcus();
         setEcuList(ecus);
 
-        // Auto-select first ECU if available
-        if (ecus.length > 0 && !selectedEcuId) {
+        if (ecus.length > 0) {
           setSelectedEcuId(ecus[0].id);
         }
       } catch (err) {
@@ -46,75 +41,33 @@ export function Dashboard() {
     loadEcus();
   }, []);
 
-  // Connect to WebSocket when ECU is selected
+  // reset chart on ECU switch
+    useEffect(() => {
+        setChartData([]);
+    }, [selectedEcuId]);
+
+  // Load history AFTER reset
   useEffect(() => {
-    // Close previous connection
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    if (!selectedEcuId) return;
 
-    // Connect to new ECU
-    if (selectedEcuId) {
-      const wsUrl = `ws://localhost:8000/ws/${selectedEcuId}`;
-      const client = new WebSocketClient(
-        wsUrl,
-        // (data) => {
-        //   // On message - update live data and add to chart buffer
-        //   setLiveData(data);
-        //   setChartData((prev) => [...prev, data]);
-        // },
-        (data) => {
-            setLiveData(data);
-
-            setChartData((prev) => {
-                // prevent duplicates by timestamp
-                if (prev.some(p => p.timestamp === data.timestamp)) {
-                    return prev;
-                }
-                return [...prev, data];
-            });
-        },
-        () => {
-          // On connect
-          setIsConnected(true);
-        },
-        () => {
-          // On disconnect
-          setIsConnected(false);
-        }
-      );
-      client.connect();
-      wsRef.current = client;
-    }
-
-    // Cleanup on unmount or when selectedEcuId changes
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setIsConnected(false);
-      setLiveData(null);
-    };
+    fetchEcuHistory(selectedEcuId)
+      .then((history) => {
+        const sorted = history.sort(
+          (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+        );
+        setChartData(sorted);
+      })
+      .catch((err) => {
+        console.error("Error loading history:", err);
+      });
   }, [selectedEcuId]);
 
-  useEffect(() => {
-  if (!selectedEcuId) return;
-
-  // Clear old chart immediately (important)
-  setChartData([]);
-
-  // Load historical data
-  fetchEcuHistory(selectedEcuId)
-    .then((history) => {
-      setChartData(history);
-    })
-    .catch((err) => {
-      console.error("Error loading history:", err);
-    });
-
-}, [selectedEcuId]);
+  // Append live data to graph
+useEffect(() => {
+    if (liveData) {
+      setChartData((prev) => [...prev, liveData]);
+    }
+  }, [liveData]);
 
   const handleEcuChange = (ecuId) => {
     setSelectedEcuId(ecuId);
