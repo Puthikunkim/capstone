@@ -5,6 +5,7 @@
 //     recovers from brief network interruptions without user intervention.
 //   - Parses incoming JSON messages and dispatches them to registered listener callbacks.
 
+
 class WebSocketClient {
   constructor(url, onMessage, onConnect, onDisconnect) {
     this.url = url;

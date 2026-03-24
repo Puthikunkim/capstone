@@ -3,6 +3,7 @@
 
 import PropTypes from 'prop-types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import "./EnergyChart.css";
 
 export function EnergyChart({ data }) {
   if (!data || data.length === 0) {
@@ -26,12 +27,15 @@ export function EnergyChart({ data }) {
     time: formatTime(point.timestamp),
   }));
 
+  const chartWidth = Math.max(chartData.length * 20, 600);
+
   return (
     <div className="energy-chart">
+        <div className="chart-scroll">
       {/* Voltage Chart */}
       <div className="chart-container">
         <h3>Voltage (V)</h3>
-        <ResponsiveContainer width="100%" height={250}>
+        <ResponsiveContainer width={chartWidth} height={250}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis
@@ -70,7 +74,7 @@ export function EnergyChart({ data }) {
       {/* Current Chart */}
       <div className="chart-container">
         <h3>Current (A)</h3>
-        <ResponsiveContainer width="100%" height={250}>
+        <ResponsiveContainer width={chartWidth} height={250}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis
@@ -109,7 +113,7 @@ export function EnergyChart({ data }) {
       {/* Energy Chart */}
       <div className="chart-container">
         <h3>Energy (kWh)</h3>
-        <ResponsiveContainer width="100%" height={250}>
+        <ResponsiveContainer width={chartWidth} height={250}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis
@@ -143,6 +147,7 @@ export function EnergyChart({ data }) {
             />
           </LineChart>
         </ResponsiveContainer>
+      </div>
       </div>
     </div>
   );

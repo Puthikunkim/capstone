@@ -1,5 +1,3 @@
-// HTTP utility is a wrapper around the browser Fetch API for REST calls.
-
 const API_URL = "http://localhost:8000/api";
 
 /**
@@ -40,4 +38,13 @@ export async function fetchEcus() {
  */
 export async function fetchEcu(ecuId) {
   return fetchApi(`/ecu/${ecuId}`);
+}// HTTP utility is a wrapper around the browser Fetch API for REST calls.
+
+/**
+ * Fetch a specific ECU's historical data
+ * @param {number} ecuId - The ECU ID
+ * @returns {Promise<object>} ECU's historical data
+ */
+export async function fetchEcuHistory(ecuId) {
+   return fetchApi(`/ecu/${ecuId}/history`);
 }

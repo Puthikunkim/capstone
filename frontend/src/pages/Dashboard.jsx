@@ -3,13 +3,13 @@
 //   - Renders the full dashboard layout including chart
 //   - Fetches ECU list from backend API
 //   - Displays ECU selector dropdown
-//   - Connects to WebSocket for selected ECU
+//   - Connects to WebSocket for selected ECU (via hook)
 //   - Displays live data as text
 
 import { useState, useEffect } from "react";
 import { ECUSelector } from "../components/ECUSelector";
 import { EnergyChart } from "../components/EnergyChart";
-import { fetchEcus } from "../api/http";
+import { fetchEcus, fetchEcuHistory } from "../api/http";
 import { useWebSocket } from "../hooks/useWebSocket";
 
 export function Dashboard() {
@@ -20,15 +20,14 @@ export function Dashboard() {
   const [chartData, setChartData] = useState([]);
   const { isConnected, liveData } = useWebSocket(selectedEcuId);
 
-  // Fetch ECUs from backend on component mount
+  // Fetch ECUs on mount
   useEffect(() => {
     const loadEcus = async () => {
       try {
         const ecus = await fetchEcus();
         setEcuList(ecus);
 
-        // Auto-select first ECU if available
-        if (ecus.length > 0 && !selectedEcuId) {
+        if (ecus.length > 0) {
           setSelectedEcuId(ecus[0].id);
         }
       } catch (err) {
@@ -42,17 +41,33 @@ export function Dashboard() {
     loadEcus();
   }, []);
 
-  // Append new websocket points to chart buffer.
+  // reset chart on ECU switch
+    useEffect(() => {
+        setChartData([]);
+    }, [selectedEcuId]);
+
+  // Load history AFTER reset
   useEffect(() => {
+    if (!selectedEcuId) return;
+
+    fetchEcuHistory(selectedEcuId)
+      .then((history) => {
+        const sorted = history.sort(
+          (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+        );
+        setChartData(sorted);
+      })
+      .catch((err) => {
+        console.error("Error loading history:", err);
+      });
+  }, [selectedEcuId]);
+
+  // Append live data to graph
+useEffect(() => {
     if (liveData) {
       setChartData((prev) => [...prev, liveData]);
     }
   }, [liveData]);
-
-  // Reset chart when switching to a different ECU.
-  useEffect(() => {
-    setChartData([]);
-  }, [selectedEcuId]);
 
   const handleEcuChange = (ecuId) => {
     setSelectedEcuId(ecuId);
