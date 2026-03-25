@@ -1,7 +1,6 @@
-#include <string.h>
+    #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,29 +13,18 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "esp_http_client.h"
-#include "esp_sntp.h"
 
 #include "esp_adc/adc_oneshot.h"
 
-#define WIFI_SSID            "JOES_LAPTOP"
-#define WIFI_PASSWORD        "password"
-#define SERVER_URL_BASE      "http://172.23.178.242:8000"
+#define WIFI_SSID            "2degrees Broadband - 766C"
+#define WIFI_PASSWORD        "Kumar1970"
+#define SERVER_URL_BASE      "http://192.168.178.168:8000"
 
 #define ECU_SERIAL_NUMBER    1
-#define SAMPLE_RATE          100 // Hz
-#define BATCH_SIZE           10  // Number of samples per POST
-#define SAMPLE_PERIOD        (1000000 / SAMPLE_RATE) // Microseconds
+#define SAMPLE_RATE          100
+#define BATCH_SIZE           10
+#define SAMPLE_PERIOD        (1000000 / SAMPLE_RATE) // microseconds
 #define QUEUE_DEPTH          (BATCH_SIZE * 10)
-
-// Hardware scaling constants — tune for your sensing circuit.
-// The ESP32 ADC measures 0–3.3 V over counts 0–4095 with DB_12 attenuation.
-// VOLTAGE_FULL_SCALE_V: actual line voltage (V) when ADC reads 4095.
-// CURRENT_FULL_SCALE_A: actual current (A) when ADC reads 4095.
-#define VOLTAGE_FULL_SCALE_V    3.3f
-#define CURRENT_FULL_SCALE_A    3.3f
-#define ADC_MAX_COUNT           4095.0f
-// Frame duration in hours: BATCH_SIZE samples at SAMPLE_RATE Hz
-#define FRAME_DURATION_HOURS    ((float)BATCH_SIZE / (float)SAMPLE_RATE / 3600.0f)
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -48,14 +36,14 @@ static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t sample_queue;
 static esp_http_client_handle_t http_client = NULL;
 
-// NTP time anchor — set once when SNTP syncs
-static volatile time_t  ntp_wall_sec = 0;
-static volatile int64_t ntp_boot_us  = 0;
+// Time sync anchor — set once on connection via GET /api/time
+static char     sync_timestamp[64] = {0};  // ISO string from server
+static int64_t  sync_boot_us       = 0;    // esp_timer value at sync moment
 
 typedef struct {
     int64_t time_since_boot;
-    int     voltage_raw;   // raw 12-bit ADC (0-4095)
-    int     current_raw;   // raw 12-bit ADC (0-4095)
+    int     voltage_raw;
+    int     current_raw;
 } sample_t;
 
 adc_channel_t channels[2] = {
@@ -65,47 +53,6 @@ adc_channel_t channels[2] = {
 
 adc_oneshot_unit_handle_t adc1_handle;
 static int adc_raw[2];
-
-// ----- NTP -----
-
-static void sntp_sync_cb(struct timeval *tv)
-{
-    ntp_wall_sec = tv->tv_sec;
-    ntp_boot_us  = esp_timer_get_time();
-    ESP_LOGI(TAG, "SNTP synced, wall_sec=%lld", (long long)ntp_wall_sec);
-}
-
-static void sntp_init_and_wait(void)
-{
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
-    sntp_set_time_sync_notification_cb(sntp_sync_cb);
-    esp_sntp_init();
-    ESP_LOGI(TAG, "Waiting for NTP sync...");
-    while (ntp_wall_sec == 0)
-        vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_LOGI(TAG, "NTP synced");
-}
-
-// ----- ADC -----
-
-void adc_init(void)
-{
-    adc_oneshot_unit_init_cfg_t unit_config = {
-        .unit_id = ADC_UNIT_1
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_config, &adc1_handle));
-
-    adc_oneshot_chan_cfg_t channel_config = {
-        .atten    = ADC_ATTEN_DB_12,
-        .bitwidth = ADC_BITWIDTH_12
-    };
-    for (int i = 0; i < 2; i++) {
-        ESP_ERROR_CHECK(
-            adc_oneshot_config_channel(adc1_handle, channels[i], &channel_config)
-        );
-    }
-}
 
 // ----- WiFi -----
 
@@ -118,12 +65,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
-        ESP_LOGI(TAG, "Connected to IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Connected, IP: " IPSTR, IP2STR(&event->ip_info.ip));
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
 
-void wifi_init(void)
+static void wifi_init(void)
 {
     wifi_event_group = xEventGroupCreate();
     esp_netif_init();
@@ -150,12 +97,91 @@ void wifi_init(void)
     esp_wifi_set_ps(WIFI_PS_NONE);
 }
 
+// ----- Time sync -----
+
+static char time_response_buf[256];
+
+static esp_err_t time_sync_http_event_handler(esp_http_client_event_t *evt)
+{
+    if (evt->event_id == HTTP_EVENT_ON_DATA) {
+        int copy_len = evt->data_len < (int)sizeof(time_response_buf) - 1
+                       ? evt->data_len
+                       : (int)sizeof(time_response_buf) - 1;
+        memcpy(time_response_buf, evt->data, copy_len);
+        time_response_buf[copy_len] = '\0';
+    }
+    return ESP_OK;
+}
+
+static void fetch_time_sync(void)
+{
+    memset(time_response_buf, 0, sizeof(time_response_buf));
+
+    esp_http_client_config_t config = {
+        .url            = SERVER_URL_BASE "/api/time",
+        .method         = HTTP_METHOD_GET,
+        .timeout_ms     = 2000,
+        .event_handler  = time_sync_http_event_handler,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_err_t err = esp_http_client_perform(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Time sync GET failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    // Parse {"timestamp": "2026-03-25T12:00:00.000000"}
+    // Simple substring extract — no need for a full JSON parser
+    char *start = strstr(time_response_buf, "\"timestamp\"");
+    if (start) {
+        start = strchr(start, ':');          // point to ':'
+        if (start) {
+            start++;
+            while (*start == ' ' || *start == '"') start++;  // skip whitespace and opening quote
+            char *end = strchr(start, '"');
+            if (end) {
+                size_t len = end - start;
+                if (len < sizeof(sync_timestamp)) {
+                    strncpy(sync_timestamp, start, len);
+                    sync_timestamp[len] = '\0';
+                }
+            }
+        }
+    }
+
+    sync_boot_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "Synced to server time: %s", sync_timestamp);
+}
+
+// ----- ADC -----
+
+static void adc_init(void)
+{
+    adc_oneshot_unit_init_cfg_t unit_config = {
+        .unit_id = ADC_UNIT_1
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_config, &adc1_handle));
+
+    adc_oneshot_chan_cfg_t channel_config = {
+        .atten    = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12
+    };
+    for (int i = 0; i < 2; i++) {
+        ESP_ERROR_CHECK(
+            adc_oneshot_config_channel(adc1_handle, channels[i], &channel_config)
+        );
+    }
+}
+
 // ----- HTTP -----
 
 static void http_client_init(void)
 {
     esp_http_client_config_t config = {
-        .url               = SERVER_URL_BASE "/data",
+        .url               = SERVER_URL_BASE "/api/data",
         .timeout_ms        = 2000,
         .keep_alive_enable = true,
         .buffer_size       = 512,
@@ -164,23 +190,22 @@ static void http_client_init(void)
     http_client = esp_http_client_init(&config);
 }
 
-static void http_post(const char *url, const char *body)
+static void http_post(const char *body)
 {
-    esp_http_client_set_url(http_client, url);
+    esp_http_client_set_url(http_client, SERVER_URL_BASE "/api/data");
     esp_http_client_set_method(http_client, HTTP_METHOD_POST);
     esp_http_client_set_header(http_client, "Content-Type", "application/json");
     esp_http_client_set_post_field(http_client, body, strlen(body));
 
-    ESP_LOGI(TAG, "POST begin");
     esp_err_t err = esp_http_client_perform(http_client);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "POST Ok -> %s", url);
+        ESP_LOGI(TAG, "POST ok, status=%d", esp_http_client_get_status_code(http_client));
     } else {
-        ESP_LOGE(TAG, "POST Failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "POST failed: %s", esp_err_to_name(err));
     }
 }
 
-// ----- Sampling timer (ISR context) -----
+// ----- Sampling timer -----
 
 static void sampling_timer_callback(void *arg)
 {
@@ -207,43 +232,25 @@ static void post_task(void *arg)
     char body[512];
 
     while (1) {
+        // Block until we have a full batch
         for (int i = 0; i < BATCH_SIZE; i++)
             xQueueReceive(sample_queue, &batch[i], portMAX_DELAY);
 
-        UBaseType_t waiting = uxQueueMessagesWaiting(sample_queue);
-        ESP_LOGW(TAG, "Queue depth after receive: %d", (int)waiting);
+        // Compute timestamp for first sample using offset from sync point
+        // mirrors the Python sim's elapsed = time.monotonic() - sync_monotonic
+        int64_t elapsed_us  = batch[0].time_since_boot - sync_boot_us;
+        int64_t elapsed_ms  = elapsed_us / 1000LL;
 
-        // Convert the first sample's boot-relative time to an ISO 8601 UTC timestamp
-        int64_t offset_us = batch[0].time_since_boot - ntp_boot_us;
-        time_t  wall_sec  = ntp_wall_sec + (time_t)(offset_us / 1000000LL);
-        int32_t wall_us   = (int32_t)(offset_us % 1000000LL);
-        if (wall_us < 0) { wall_sec--; wall_us += 1000000; }
+        // Append elapsed ms to the synced ISO string
+        // e.g. "2026-03-25T12:00:00.000000+1234ms"
+        // Server can use this to reconstruct exact wall time if needed
+        char ts_buf[96];
+        snprintf(ts_buf, sizeof(ts_buf), "%s+%lldms", sync_timestamp, (long long)elapsed_ms);
 
-        struct tm tm_info;
-        gmtime_r(&wall_sec, &tm_info);
-
-        char ts_buf[32];
-        snprintf(ts_buf, sizeof(ts_buf), "%04d-%02d-%02dT%02d:%02d:%02d.%06dZ",
-                 tm_info.tm_year + 1900, tm_info.tm_mon + 1, tm_info.tm_mday,
-                 tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec, (int)wall_us);
-
-        // Energy = avg_power * frame_duration
-        // Convert raw ADC counts to physical units using the hardware scale constants
-        float sum_v = 0.0f, sum_i = 0.0f;
-        for (int i = 0; i < BATCH_SIZE; i++) {
-            sum_v += batch[i].voltage_raw;
-            sum_i += batch[i].current_raw;
-        }
-        float voltage_v = (sum_v / BATCH_SIZE) * (VOLTAGE_FULL_SCALE_V / ADC_MAX_COUNT);
-        float current_a = (sum_i / BATCH_SIZE) * (CURRENT_FULL_SCALE_A / ADC_MAX_COUNT);
-        float energy_wh = voltage_v * current_a * FRAME_DURATION_HOURS;
-
-        // Build JSON body matching EnergyFrameIngest
+        // Build JSON payload
         int pos = 0;
         pos += snprintf(body + pos, sizeof(body) - pos,
-                        "{\"ecu_serial\":%d"
-                        ",\"timestamp\":\"%s\""
-                        ",\"voltage_samples\":[",
+                        "{\"ecu_serial\":%d,\"timestamp\":\"%s\",\"voltage_samples\":[",
                         ECU_SERIAL_NUMBER, ts_buf);
 
         for (int i = 0; i < BATCH_SIZE; i++)
@@ -256,9 +263,9 @@ static void post_task(void *arg)
             pos += snprintf(body + pos, sizeof(body) - pos,
                             "%d%s", batch[i].current_raw, i < BATCH_SIZE - 1 ? "," : "");
 
-        pos += snprintf(body + pos, sizeof(body) - pos, "],\"energy\":%.6f}", energy_wh);
+        pos += snprintf(body + pos, sizeof(body) - pos, "]}");
 
-        http_post(SERVER_URL_BASE "/data", body);
+        http_post(body);
     }
 }
 
@@ -276,13 +283,13 @@ void app_main(void)
     sample_queue = xQueueCreate(QUEUE_DEPTH, sizeof(sample_t));
 
     wifi_init();
-    sntp_init_and_wait();   // get real wall time before sampling starts
+    fetch_time_sync();   // GET /api/time once on connection
     http_client_init();
 
     xTaskCreate(post_task, "post_task", 8192, NULL, 10, NULL);
 
     adc_init();
-    ESP_LOGI(TAG, "ADC Started");
+    ESP_LOGI(TAG, "ADC started at %d Hz", SAMPLE_RATE);
 
     esp_timer_handle_t sample_timer;
     esp_timer_create_args_t timer_args = {
@@ -293,6 +300,4 @@ void app_main(void)
     };
     esp_timer_create(&timer_args, &sample_timer);
     esp_timer_start_periodic(sample_timer, SAMPLE_PERIOD);
-
-    ESP_LOGI(TAG, "Sampling started at %d Hz", SAMPLE_RATE);
 }
