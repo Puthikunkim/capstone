@@ -17,8 +17,8 @@
 #include "esp_adc/adc_oneshot.h"
 
 #define WIFI_SSID "enter_ssid_here"
-#define WIFI_PASSWORD "password_here"
-#define SERVER_URL_BASE "ip:port"
+#define WIFI_PASSWORD "enter_password_here"
+#define SERVER_URL_BASE "https://<SERVER_IP>:8443"
 
 #define ECU_SERIAL_NUMBER 1
 #define SAMPLE_RATE 100
@@ -32,6 +32,27 @@
 #define ADC_VOLTAGE_CHANNEL ADC_CHANNEL_7
 
 static const char *TAG = "ESP32";
+static const char *ca_cert = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIDFTCCAf2gAwIBAgIUZAcNdCitZV5/kCAkaIbOUjhCnugwDQYJKoZIhvcNAQEL
+BQAwGjEYMBYGA1UEAwwPMTkyLjE2OC4xNzguMTY4MB4XDTI2MDMyNjA2NTEwMloX
+DTI3MDMyNjA2NTEwMlowGjEYMBYGA1UEAwwPMTkyLjE2OC4xNzguMTY4MIIBIjAN
+BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtY9c3uQtjomG2WqtGu56KFlqrib8
+XKC9SMXFprspPVQj/YnbBfB+RW0BOJ608o8fYDDt7lzVAJbjFL8IrYnD9JTIh+UO
+bZ5du1bcsbz+hRrlfiflMZNnoH+x3oM9oBqBxs+tXg+r4DFUXK5aiWsAXjmo4jSC
+7Mdd4A10N1AFfDMyrebtYQtgssu7jEGGoh+pLL+nzi/k1/XUa9ehKmLMAQ+awMwM
+rxeZIi5cea5i/ANuGl+bKq8Ocz5E/eipQUMXx1xp70CnCSt7ctmipGhC/SvipnEq
+BHCe01GVgur7QZAKqx9hh62P5AMisNaAqpEBQdQDwg79ln5JNxiKTPhlPQIDAQAB
+o1MwUTAdBgNVHQ4EFgQUsl5aCePxOjstkqJrd1ByF9VejCwwHwYDVR0jBBgwFoAU
+sl5aCePxOjstkqJrd1ByF9VejCwwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0B
+AQsFAAOCAQEACYbrJRKdVgKmZ3yYWdYDw1RGvD2e0JgEhGNjzPli7Ys3hilYUIUY
+szF9wPqe6TXn6VQM5ELHAJbGg98+ssbWgYBJU6yiPFZ4J6EzV0rybKLkRl+PMM/+
+/jIJpqcmKS54DYScw7dLMIL4qK+V7tAGC+ynJBAGhMOzpDMhfpti61axipbOfO6X
+tnmwUD1ImsG0BIaFNhGZABK9L18mE0kj9wLN7oXOudxNgec1a9/9dXhmescgxZgY
+HTbNVn4iq0M84zb95DK03pOLvuJc73S7UaxIzbG+a7jl74ZFHxXzENYq0Uq5fG/u
+kcKE+qsj+lbWGNLMMpa1XS00HujJMwaAgQ==
+-----END CERTIFICATE-----
+)EOF";
 static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t sample_queue;
 static esp_http_client_handle_t http_client = NULL;
@@ -128,6 +149,7 @@ static void fetch_time_sync(void)
         .method = HTTP_METHOD_GET,
         .timeout_ms = 2000,
         .event_handler = time_sync_http_event_handler,
+        .cert_pem = ca_cert,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -196,6 +218,7 @@ static void http_client_init(void)
         .keep_alive_enable = true,
         .buffer_size = 512,
         .buffer_size_tx = 1024,
+        .cert_pem = ca_cert,
     };
     http_client = esp_http_client_init(&config);
 }
