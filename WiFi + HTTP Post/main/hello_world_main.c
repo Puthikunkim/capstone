@@ -16,9 +16,9 @@
 
 #include "esp_adc/adc_oneshot.h"
 
-#define WIFI_SSID "2degrees Broadband - 766C"
-#define WIFI_PASSWORD "Kumar1970"
-#define SERVER_URL_BASE "http://192.168.178.168:8000"
+#define WIFI_SSID "enter_ssid_here"
+#define WIFI_PASSWORD "password_here"
+#define SERVER_URL_BASE "ip:port"
 
 #define ECU_SERIAL_NUMBER 1
 #define SAMPLE_RATE 100
@@ -253,11 +253,9 @@ static void post_task(void *arg)
         // Compute timestamp for first sample using offset from sync point
         // mirrors the Python sim's elapsed = time.monotonic() - sync_monotonic
         int64_t elapsed_us = batch[0].time_since_boot - sync_boot_us;
-        int64_t elapsed_ms = elapsed_us / 1000LL;
 
         // parse sync_timestamp "2026-03-25T12:00:00.000000" into a struct tm
         struct tm tm_base = {0};
-        int base_us = 0;
         // parse up to microseconds
         char base_no_us[32];
         int us = 0;
@@ -287,7 +285,7 @@ static void post_task(void *arg)
                  final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
                  final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
 
-                 
+
             // Build JSON payload
             int pos = 0;
         pos += snprintf(body + pos, sizeof(body) - pos,
