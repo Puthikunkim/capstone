@@ -15,10 +15,12 @@
 #include "esp_http_client.h"
 
 #include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 
-#define WIFI_SSID "enter_ssid_here"
-#define WIFI_PASSWORD "enter_password_here"
-#define SERVER_URL_BASE "https://<SERVER_IP>:8443"
+#define WIFI_SSID "testing"
+#define WIFI_PASSWORD "66666666"
+#define SERVER_URL_BASE "https://10.60.134.59:8443"
 
 #define ECU_SERIAL_NUMBER 1
 #define SAMPLE_RATE 100
@@ -34,23 +36,23 @@
 static const char *TAG = "ESP32";
 static const char *ca_cert = R"EOF(
 -----BEGIN CERTIFICATE-----
-MIIDFTCCAf2gAwIBAgIUZAcNdCitZV5/kCAkaIbOUjhCnugwDQYJKoZIhvcNAQEL
-BQAwGjEYMBYGA1UEAwwPMTkyLjE2OC4xNzguMTY4MB4XDTI2MDMyNjA2NTEwMloX
-DTI3MDMyNjA2NTEwMlowGjEYMBYGA1UEAwwPMTkyLjE2OC4xNzguMTY4MIIBIjAN
-BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtY9c3uQtjomG2WqtGu56KFlqrib8
-XKC9SMXFprspPVQj/YnbBfB+RW0BOJ608o8fYDDt7lzVAJbjFL8IrYnD9JTIh+UO
-bZ5du1bcsbz+hRrlfiflMZNnoH+x3oM9oBqBxs+tXg+r4DFUXK5aiWsAXjmo4jSC
-7Mdd4A10N1AFfDMyrebtYQtgssu7jEGGoh+pLL+nzi/k1/XUa9ehKmLMAQ+awMwM
-rxeZIi5cea5i/ANuGl+bKq8Ocz5E/eipQUMXx1xp70CnCSt7ctmipGhC/SvipnEq
-BHCe01GVgur7QZAKqx9hh62P5AMisNaAqpEBQdQDwg79ln5JNxiKTPhlPQIDAQAB
-o1MwUTAdBgNVHQ4EFgQUsl5aCePxOjstkqJrd1ByF9VejCwwHwYDVR0jBBgwFoAU
-sl5aCePxOjstkqJrd1ByF9VejCwwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0B
-AQsFAAOCAQEACYbrJRKdVgKmZ3yYWdYDw1RGvD2e0JgEhGNjzPli7Ys3hilYUIUY
-szF9wPqe6TXn6VQM5ELHAJbGg98+ssbWgYBJU6yiPFZ4J6EzV0rybKLkRl+PMM/+
-/jIJpqcmKS54DYScw7dLMIL4qK+V7tAGC+ynJBAGhMOzpDMhfpti61axipbOfO6X
-tnmwUD1ImsG0BIaFNhGZABK9L18mE0kj9wLN7oXOudxNgec1a9/9dXhmescgxZgY
-HTbNVn4iq0M84zb95DK03pOLvuJc73S7UaxIzbG+a7jl74ZFHxXzENYq0Uq5fG/u
-kcKE+qsj+lbWGNLMMpa1XS00HujJMwaAgQ==
+MIIDDzCCAfegAwIBAgIUQBYr1tTWgy+KETPgrPkeoDTSCIgwDQYJKoZIhvcNAQEL
+BQAwFzEVMBMGA1UEAwwMMTAuNjAuMTM0LjU5MB4XDTI2MDMyNzAzMzcwN1oXDTI3
+MDMyNzAzMzcwN1owFzEVMBMGA1UEAwwMMTAuNjAuMTM0LjU5MIIBIjANBgkqhkiG
+9w0BAQEFAAOCAQ8AMIIBCgKCAQEApETpkPYDCIWfCUNKq2nGfdEitoI7Oz6U++rN
+sU8VbMfI7JSKViM/KH0FcsFyywnyhLbowsM+UJjr7295bAPLhUyFTnFhME6XjADQ
+BO22fmMMRcAJRK98bO6Lt/fnsRmMFF3Qwbwk8pxr9kqSA3n473MRsTgm7J2TZJg6
+hYSfZo90QzVpCm0i/BOS/i4qasYgdh+J8p7c5HGqBFgK0Rn8DIYmgDPKf5sEdEvJ
+brrO8UtZnjTtfjwIU7HnfyZkBntEbQPh+4WjOsnJ5QaMem/TudPjw8XTbP5gsMk6
+ktHjrwdKI/g6qqoQ5ctskR1x2XTSDI+7J7PbfUs2G4U2EpN37QIDAQABo1MwUTAd
+BgNVHQ4EFgQU9G8NgykFQVoQjjcUUJIFUvbaTGMwHwYDVR0jBBgwFoAU9G8NgykF
+QVoQjjcUUJIFUvbaTGMwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
+AQEAM3NfZ4OTjuKRS1zfs+rxkZivo9jaBb2glsG2dBLZc04p9AGv/UeszDnR/xXF
+zmnvnWTbi95Yd6MdF6fmfkfIutpzzGYHxQUXaW71/hyfWZvjXZDsi8owyLkDwFaZ
+TpZvf9vvM3pJy1VL5sZ5se4+XrcgIj7BgzmaNqeQzj4ljEcy+c9yh16EGVR0fpbs
+1xyyB7jHDXQ7D6B6DkfpldIBQTvrHaUjQFlTmg9OUIdIXxaMrRkmLIecIMJ2F8+A
+iuxwPq2qZnYirmByQjuKKuXA2Vau7NNQmP1ds++7XEVULye2415VIuogsE6Z77Lb
+Ing9uVOpmidyMUDmTx5zTb00mQ==
 -----END CERTIFICATE-----
 )EOF";
 static EventGroupHandle_t wifi_event_group;
@@ -64,8 +66,8 @@ static int64_t sync_boot_us = 0;      // esp_timer value at sync moment
 typedef struct
 {
     int64_t time_since_boot;
-    int voltage_raw;
-    int current_raw;
+    int     voltage_raw;
+    int     current_raw;
 } sample_t;
 
 adc_channel_t channels[2] = {
@@ -74,6 +76,10 @@ adc_channel_t channels[2] = {
 
 adc_oneshot_unit_handle_t adc1_handle;
 static int adc_raw[2];
+static TaskHandle_t adc_task_handle = NULL; 
+static int voltage[2];
+adc_cali_handle_t adc1_cali_chan0_handle = NULL;
+adc_cali_handle_t adc1_cali_chan1_handle = NULL;
 
 // ----- WiFi -----
 
@@ -147,7 +153,7 @@ static void fetch_time_sync(void)
     esp_http_client_config_t config = {
         .url = SERVER_URL_BASE "/api/time",
         .method = HTTP_METHOD_GET,
-        .timeout_ms = 2000,
+        .timeout_ms = 10000,
         .event_handler = time_sync_http_event_handler,
         .cert_pem = ca_cert,
     };
@@ -190,7 +196,54 @@ static void fetch_time_sync(void)
     ESP_LOGI(TAG, "Synced to server time: %s", sync_timestamp);
 }
 
-// ----- ADC -----
+/*---------------------------------------------------------------
+                        ADC CALIBRATION
+---------------------------------------------------------------*/
+
+static bool adc_calibration_init(adc_unit_t unit,
+                                 adc_channel_t channel,
+                                 adc_atten_t atten,
+                                 adc_cali_handle_t *out_handle)
+{
+    adc_cali_handle_t handle = NULL;
+    esp_err_t ret = ESP_FAIL;
+    bool calibrated = false;
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cali_config = {
+        .unit_id  = unit,
+        .chan     = channel,
+        .atten    = atten,
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
+    if (ret == ESP_OK) calibrated = true;
+#endif
+
+#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    if (!calibrated) {
+        adc_cali_line_fitting_config_t cali_config = {
+            .unit_id  = unit,
+            .atten    = atten,
+            .bitwidth = ADC_BITWIDTH_DEFAULT,
+        };
+        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
+        if (ret == ESP_OK) calibrated = true;
+    }
+#endif
+
+    *out_handle = handle;
+
+    if (calibrated) {
+        ESP_LOGI(TAG, "ADC Calibration Success");
+    } else {
+        ESP_LOGW(TAG, "ADC Calibration not supported");
+    }
+
+    return calibrated;
+}
+
+// ----- ADC initial-----
 
 static void adc_init(void)
 {
@@ -206,6 +259,9 @@ static void adc_init(void)
         ESP_ERROR_CHECK(
             adc_oneshot_config_channel(adc1_handle, channels[i], &channel_config));
     }
+
+    adc_calibration_init(ADC_UNIT_1, channels[0], ADC_ATTEN_DB_12, &adc1_cali_chan0_handle);
+    adc_calibration_init(ADC_UNIT_1, channels[1], ADC_ATTEN_DB_12, &adc1_cali_chan1_handle);
 }
 
 // ----- HTTP -----
@@ -245,19 +301,47 @@ static void http_post(const char *body)
 
 static void sampling_timer_callback(void *arg)
 {
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, channels[0], &adc_raw[0]));
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, channels[1], &adc_raw[1]));
-
-    sample_t s = {
-        .time_since_boot = esp_timer_get_time(),
-        .voltage_raw = adc_raw[1], // channel 7
-        .current_raw = adc_raw[0], // channel 6
-    };
-
     BaseType_t higher_priority_task_woken = pdFALSE;
-    xQueueSendFromISR(sample_queue, &s, &higher_priority_task_woken);
-    if (higher_priority_task_woken)
-        portYIELD_FROM_ISR();
+    vTaskNotifyGiveFromISR(adc_task_handle, &higher_priority_task_woken);
+    portYIELD_FROM_ISR(higher_priority_task_woken);
+}
+
+// ----- ADC reading ------
+static void adc_task(void *arg)
+{
+    while (1)
+    {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+         /* Read Current Channel */
+        ESP_ERROR_CHECK(
+            adc_oneshot_read(adc1_handle, channels[0], &adc_raw[0])
+        );
+        adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw[0], &voltage[0]);
+
+        /* Read Voltage Channel */
+        ESP_ERROR_CHECK(
+            adc_oneshot_read(adc1_handle, channels[1], &adc_raw[1])
+        );
+        adc_cali_raw_to_voltage(adc1_cali_chan1_handle, adc_raw[1], &voltage[1]);
+
+       sample_t s = {
+            .time_since_boot = esp_timer_get_time(),
+            .voltage_raw = voltage[1],  
+            .current_raw = voltage[0], 
+        };
+
+        static int log_counter = 0;
+        if (++log_counter >= 10) {
+            ESP_LOGI(TAG, "ADC | current_raw=%4d  voltage_raw=%4d",
+                     s.current_raw, s.voltage_raw);
+            log_counter = 0;
+        }
+
+        // if (xQueueSend(sample_queue, &s, 0) != pdTRUE) {
+        //     ESP_LOGW(TAG, "Sample queue full — sample dropped");
+        // }
+    }
 }
 
 // ----- POST task -----
@@ -331,6 +415,7 @@ static void post_task(void *arg)
     }
 }
 
+
 // ----- Entry point -----
 
 void app_main(void)
@@ -354,6 +439,8 @@ void app_main(void)
     adc_init();
     ESP_LOGI(TAG, "ADC started at %d Hz", SAMPLE_RATE);
 
+    xTaskCreate(adc_task, "adc_task", 4096, NULL, 5, &adc_task_handle);
+
     esp_timer_handle_t sample_timer;
     esp_timer_create_args_t timer_args = {
         .callback = sampling_timer_callback,
@@ -361,6 +448,7 @@ void app_main(void)
         .dispatch_method = ESP_TIMER_TASK,
         .name = "sample_timer",
     };
+
     esp_timer_create(&timer_args, &sample_timer);
     esp_timer_start_periodic(sample_timer, SAMPLE_PERIOD);
 }
