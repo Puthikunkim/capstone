@@ -18,11 +18,11 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
-#define WIFI_SSID "testing"
-#define WIFI_PASSWORD "66666666"
-#define SERVER_URL_BASE "https://10.60.134.59:8443"
+#define WIFI_SSID "Joe56"
+#define WIFI_PASSWORD "password"
+#define SERVER_URL_BASE "http://10.16.208.12:8000"
 
-#define ECU_SERIAL_NUMBER 1
+#define ECU_SERIAL_NUMBER 2
 #define SAMPLE_RATE 100
 #define BATCH_SIZE 10
 #define SAMPLE_PERIOD (1000000 / SAMPLE_RATE) // microseconds
@@ -34,27 +34,7 @@
 #define ADC_VOLTAGE_CHANNEL ADC_CHANNEL_7
 
 static const char *TAG = "ESP32";
-static const char *ca_cert = R"EOF(
------BEGIN CERTIFICATE-----
-MIIDDzCCAfegAwIBAgIUQBYr1tTWgy+KETPgrPkeoDTSCIgwDQYJKoZIhvcNAQEL
-BQAwFzEVMBMGA1UEAwwMMTAuNjAuMTM0LjU5MB4XDTI2MDMyNzAzMzcwN1oXDTI3
-MDMyNzAzMzcwN1owFzEVMBMGA1UEAwwMMTAuNjAuMTM0LjU5MIIBIjANBgkqhkiG
-9w0BAQEFAAOCAQ8AMIIBCgKCAQEApETpkPYDCIWfCUNKq2nGfdEitoI7Oz6U++rN
-sU8VbMfI7JSKViM/KH0FcsFyywnyhLbowsM+UJjr7295bAPLhUyFTnFhME6XjADQ
-BO22fmMMRcAJRK98bO6Lt/fnsRmMFF3Qwbwk8pxr9kqSA3n473MRsTgm7J2TZJg6
-hYSfZo90QzVpCm0i/BOS/i4qasYgdh+J8p7c5HGqBFgK0Rn8DIYmgDPKf5sEdEvJ
-brrO8UtZnjTtfjwIU7HnfyZkBntEbQPh+4WjOsnJ5QaMem/TudPjw8XTbP5gsMk6
-ktHjrwdKI/g6qqoQ5ctskR1x2XTSDI+7J7PbfUs2G4U2EpN37QIDAQABo1MwUTAd
-BgNVHQ4EFgQU9G8NgykFQVoQjjcUUJIFUvbaTGMwHwYDVR0jBBgwFoAU9G8NgykF
-QVoQjjcUUJIFUvbaTGMwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOC
-AQEAM3NfZ4OTjuKRS1zfs+rxkZivo9jaBb2glsG2dBLZc04p9AGv/UeszDnR/xXF
-zmnvnWTbi95Yd6MdF6fmfkfIutpzzGYHxQUXaW71/hyfWZvjXZDsi8owyLkDwFaZ
-TpZvf9vvM3pJy1VL5sZ5se4+XrcgIj7BgzmaNqeQzj4ljEcy+c9yh16EGVR0fpbs
-1xyyB7jHDXQ7D6B6DkfpldIBQTvrHaUjQFlTmg9OUIdIXxaMrRkmLIecIMJ2F8+A
-iuxwPq2qZnYirmByQjuKKuXA2Vau7NNQmP1ds++7XEVULye2415VIuogsE6Z77Lb
-Ing9uVOpmidyMUDmTx5zTb00mQ==
------END CERTIFICATE-----
-)EOF";
+
 static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t sample_queue;
 static esp_http_client_handle_t http_client = NULL;
@@ -155,7 +135,7 @@ static void fetch_time_sync(void)
         .method = HTTP_METHOD_GET,
         .timeout_ms = 10000,
         .event_handler = time_sync_http_event_handler,
-        .cert_pem = ca_cert,
+
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -274,7 +254,6 @@ static void http_client_init(void)
         .keep_alive_enable = true,
         .buffer_size = 512,
         .buffer_size_tx = 1024,
-        .cert_pem = ca_cert,
     };
     http_client = esp_http_client_init(&config);
 }
@@ -338,9 +317,9 @@ static void adc_task(void *arg)
             log_counter = 0;
         }
 
-        // if (xQueueSend(sample_queue, &s, 0) != pdTRUE) {
-        //     ESP_LOGW(TAG, "Sample queue full — sample dropped");
-        // }
+        if (xQueueSend(sample_queue, &s, 0) != pdTRUE) {
+            ESP_LOGW(TAG, "Sample queue full — sample dropped");
+        }
     }
 }
 
