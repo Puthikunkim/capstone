@@ -237,6 +237,17 @@ def configure_ecu(db: Session, ecu_id: int, updates: Any) -> ECU | None:
 	db.refresh(ecu)
 	return ecu
 
+
+def set_ecu_firmware_version(db: Session, ecu_id: int, firmware_version: str) -> ECU | None:
+	ecu = db.get(ECU, ecu_id)
+	if ecu is None:
+		return None
+
+	ecu.firmware_version = firmware_version
+	db.commit()
+	db.refresh(ecu)
+	return ecu
+
 # Function to retrieve alerts, with optional filtering by ECU and time range, and limit on number of results. This is used by the frontend to display alert history.
 def get_alerts(
 	db: Session,
