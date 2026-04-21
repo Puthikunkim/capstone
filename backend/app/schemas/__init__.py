@@ -13,12 +13,20 @@ from .firmware import (
     FirmwareUploadResponse,
 )
 from .power_violation_event import PowerViolationEventResponse
+from .scoring import (
+    ScoringBracketResponse,
+    ScoringEntryResponse,
+    ScoringEventResponse,
+    ScoringMetric,
+    ScoringStatus,
+)
 
 __all__ = [
     "ECUBase", "ECUCreate", "ECUConfigure", "ECUResponse",
     "EnergyFrameIngest", "EnergyFrameResponse",
     "EnergyFrameBatchIngest", "EnergyFrameBatchResponse",
     "FirmwareJobStatus", "FirmwareUploadResponse", "FirmwareStatusResponse", "FirmwareProgressUpdate",
+    "ScoringMetric", "ScoringStatus", "ScoringEntryResponse", "ScoringBracketResponse", "ScoringEventResponse",
     "AlertResponse",
     "PowerViolationEventResponse",
 ]
