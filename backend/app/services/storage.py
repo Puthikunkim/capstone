@@ -84,7 +84,12 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 		ecu.power_limit_watts = float(updates["power_limit_watts"])
 
 	if "last_seen" in updates and updates["last_seen"] is not None:
-		ecu.last_seen = _to_utc(updates["last_seen"])
+		incoming_last_seen = _to_utc(updates["last_seen"])
+		current_last_seen = _to_utc(ecu.last_seen)
+		if current_last_seen is None or (
+			incoming_last_seen is not None and incoming_last_seen > current_last_seen
+		):
+			ecu.last_seen = incoming_last_seen
 
 	if "temperature" in updates and updates["temperature"] is not None:
 		ecu.temperature = float(updates["temperature"])

@@ -25,3 +25,14 @@ class EnergyFrameResponse(BaseModel):
     energy: float              
 
     model_config = {"from_attributes": True}
+
+
+class EnergyFrameBatchIngest(BaseModel):
+    frames: list[EnergyFrameIngest]
+
+
+class EnergyFrameBatchResponse(BaseModel):
+    received: int
+    inserted: int
+    duplicates: int
+    frames: list[EnergyFrameResponse]
