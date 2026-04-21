@@ -155,6 +155,7 @@ def save_frame(db: Session, frame_data: Any) -> EnergyFrame:
 		timestamp=frame_timestamp,
 		avg_voltage=float(payload["avg_voltage"]),
 		avg_current=float(payload["avg_current"]),
+		power_watts=float(payload["avg_voltage"]) * float(payload["avg_current"]),
 		energy=float(payload["energy"]),
 	)
 	db.add(frame)
@@ -168,12 +169,11 @@ def check_and_record_alert(db: Session, frame: EnergyFrame, ecu: ECU | None = No
 	if attached_ecu is None:
 		return None
 
-    # Calculate power in watts from the frame's voltage and current.
-	power_watts = float(frame.avg_voltage) * float(frame.avg_current)
+	power_watts = float(frame.power_watts)
 	if power_watts <= float(attached_ecu.power_limit_watts):
 		return None
 
-    # Before creating a new alert, check if an alert for this frame already exists to prevent duplicates, which could happen if the same frame is processed multiple times due to network issues or retries.
+	# Before creating a new alert, check if an alert for this frame already exists to prevent duplicates, which could happen if the same frame is processed multiple times due to network issues or retries.
 	existing_alert = db.scalar(select(Alert).where(Alert.frame_id == frame.id))
 	if existing_alert is not None:
 		return existing_alert

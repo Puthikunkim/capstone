@@ -21,6 +21,7 @@ class EnergyFrame(Base):
 	timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 	avg_voltage: Mapped[float] = mapped_column(Float, nullable=False) # Might need to be changed to an array of values
 	avg_current: Mapped[float] = mapped_column(Float, nullable=False) # Might need to be changed to an array of values
+	power_watts: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 	energy: Mapped[float] = mapped_column(Float, nullable=False) # Might need to be changed to an array of values
 
 	ecu = relationship("ECU", back_populates="energy_frames") # An energy frame belongs to an ECU, this field doesn't exist in the db
