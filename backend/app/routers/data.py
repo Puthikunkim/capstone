@@ -48,6 +48,9 @@ async def ingest_frame(payload: EnergyFrameIngest, db: Session = Depends(get_db)
     if violation_update.transition == "started":
         alert = check_and_record_alert(db, frame, ecu=None)
 
+    if violation_update.event is not None and violation_update.transition in {"started", "ended"}:
+        await manager.notify_violation_event(violation_update.event, violation_update.transition)
+
     await manager.notify(f"ecu_{frame.ecu_id}", EnergyFrameResponse.model_validate(frame).model_dump(mode="json"))
 
     if alert:
