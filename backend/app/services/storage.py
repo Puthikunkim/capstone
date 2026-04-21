@@ -121,7 +121,7 @@ def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) 
 	db.flush()
 	return ecu
 
-def save_frame(db: Session, frame_data: Any) -> EnergyFrame:
+def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 	payload = _to_dict(frame_data)
 	ecu = _get_or_create_ecu_by_serial(db, payload)
 	_apply_ecu_updates(
@@ -148,7 +148,7 @@ def save_frame(db: Session, frame_data: Any) -> EnergyFrame:
 	if existing_frame is not None:
 		db.commit()
 		db.refresh(existing_frame)
-		return existing_frame
+		return existing_frame, False
 
 	frame = EnergyFrame(
 		ecu_id=ecu.id,
@@ -161,7 +161,7 @@ def save_frame(db: Session, frame_data: Any) -> EnergyFrame:
 	db.add(frame)
 	db.commit()
 	db.refresh(frame)
-	return frame
+	return frame, True
 
 # Checks if the given energy frame breaches the power limit of its associated ECU and records an alert if necessary.
 def check_and_record_alert(db: Session, frame: EnergyFrame, ecu: ECU | None = None) -> Alert | None:

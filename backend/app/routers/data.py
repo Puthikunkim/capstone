@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.energy_frame import EnergyFrameIngest, EnergyFrameResponse
 from app.services.broadcast import manager
+from app.services.penalties import track_power_violation
 from app.services.processing import convert_current_and_average, convert_voltage_and_average
 from app.services.storage import check_and_record_alert, save_frame
 
@@ -38,8 +39,14 @@ async def ingest_frame(payload: EnergyFrameIngest, db: Session = Depends(get_db)
         "energy": payload.energy,
     }
 
-    frame = save_frame(db, processed)
-    alert = check_and_record_alert(db, frame, ecu=None)
+    frame, frame_created = save_frame(db, processed)
+    if not frame_created:
+        return frame
+
+    violation_update = track_power_violation(db, frame, ecu=None)
+    alert = None
+    if violation_update.transition == "started":
+        alert = check_and_record_alert(db, frame, ecu=None)
 
     await manager.notify(f"ecu_{frame.ecu_id}", EnergyFrameResponse.model_validate(frame).model_dump(mode="json"))
 

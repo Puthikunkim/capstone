@@ -60,6 +60,12 @@ class ECU(Base):
 		cascade="all, delete-orphan",
 		passive_deletes=True,
 	) 
+	violation_events = relationship(
+		"PowerViolationEvent",
+		back_populates="ecu",
+		cascade="all, delete-orphan",
+		passive_deletes=True,
+	)
     
 	@property
 	def is_connected(self) -> bool: # A simple heuristic to determine if the ECU is currently connected based on the last time it was seen. Useful for the frontend to show connection status.

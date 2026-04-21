@@ -50,7 +50,7 @@ def init_db() -> None:
 
 	Importing models here ensures SQLAlchemy registers metadata before create_all.
 	"""
-	from app.models import Alert, ECU, EnergyFrame  # noqa: F401
+	from app.models import Alert, ECU, EnergyFrame, PowerViolationEvent  # noqa: F401
 
 	Base.metadata.create_all(bind=engine)
 	_ensure_energy_frame_power_column()
