@@ -14,6 +14,11 @@ class ScoringMetric(str, Enum):
     ELAPSED_SECONDS = "elapsed_seconds"
 
 
+class ScoringEnergySource(str, Enum):
+    TRANSMITTED = "transmitted"
+    INTEGRATED_POWER = "integrated_power"
+
+
 class ScoringStatus(str, Enum):
     SCORED = "scored"
     DNF = "dnf"
@@ -44,4 +49,5 @@ class ScoringEventResponse(BaseModel):
     start: datetime
     end: datetime
     metric: ScoringMetric
+    energy_source: ScoringEnergySource
     brackets: list[ScoringBracketResponse]

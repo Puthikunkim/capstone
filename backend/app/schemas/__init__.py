@@ -21,6 +21,7 @@ from .firmware import (
 from .power_violation_event import PowerViolationEventResponse
 from .scoring import (
     ScoringBracketResponse,
+    ScoringEnergySource,
     ScoringEntryResponse,
     ScoringEventResponse,
     ScoringMetric,
@@ -33,7 +34,7 @@ __all__ = [
     "EnergyFrameIngest", "EnergyFrameResponse",
     "EnergyFrameBatchIngest", "EnergyFrameBatchResponse",
     "FirmwareJobStatus", "FirmwareUploadResponse", "FirmwareStatusResponse", "FirmwareProgressUpdate",
-    "ScoringMetric", "ScoringStatus", "ScoringEntryResponse", "ScoringBracketResponse", "ScoringEventResponse",
+    "ScoringMetric", "ScoringStatus", "ScoringEnergySource", "ScoringEntryResponse", "ScoringBracketResponse", "ScoringEventResponse",
     "AlertResponse",
     "CompetitionCreate", "CompetitionResponse", "CompetitionDetailResponse", "CompetitionEventResponse",
     "PowerViolationEventResponse",

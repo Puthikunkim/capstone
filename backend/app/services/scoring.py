@@ -4,13 +4,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.energy_frame import EnergyFrame
 from app.schemas.scoring import (
     ScoringBracketResponse,
+    ScoringEnergySource,
     ScoringEntryResponse,
     ScoringEventResponse,
     ScoringMetric,
@@ -21,7 +22,8 @@ from app.schemas.scoring import (
 @dataclass(slots=True)
 class _Aggregate:
     frame_count: int
-    total_energy_wh: float
+    transmitted_energy_wh: float
+    integrated_energy_wh: float
     avg_power_watts: float
     elapsed_seconds: float
 
@@ -32,12 +34,18 @@ def _to_utc(timestamp: datetime) -> datetime:
     return timestamp.astimezone(timezone.utc)
 
 
-def _metric_value(aggregate: _Aggregate, metric: ScoringMetric) -> float:
+def _metric_value(
+    aggregate: _Aggregate,
+    metric: ScoringMetric,
+    energy_source: ScoringEnergySource,
+) -> float:
     if metric == ScoringMetric.AVG_POWER_WATTS:
         return aggregate.avg_power_watts
     if metric == ScoringMetric.ELAPSED_SECONDS:
         return aggregate.elapsed_seconds
-    return aggregate.total_energy_wh
+    if energy_source == ScoringEnergySource.INTEGRATED_POWER:
+        return aggregate.integrated_energy_wh
+    return aggregate.transmitted_energy_wh
 
 
 def _interpolated_score(value: float, best: float, worst: float) -> float:
@@ -48,30 +56,49 @@ def _interpolated_score(value: float, best: float, worst: float) -> float:
     return round(max(25.0, min(100.0, score)), 2)
 
 
+def _integrated_energy_wh(frames: list[EnergyFrame]) -> float:
+    if len(frames) < 2:
+        return 0.0
+
+    integrated_wh = 0.0
+    for previous, current in zip(frames, frames[1:]):
+        previous_ts = _to_utc(previous.timestamp)
+        current_ts = _to_utc(current.timestamp)
+        delta_seconds = max(0.0, (current_ts - previous_ts).total_seconds())
+        avg_power = (float(previous.power_watts) + float(current.power_watts)) / 2.0
+        integrated_wh += (avg_power * delta_seconds) / 3600.0
+
+    return integrated_wh
+
+
 def _load_aggregates(db: Session, start: datetime, end: datetime) -> dict[int, _Aggregate]:
     stmt = (
         select(
-            EnergyFrame.ecu_id.label("ecu_id"),
-            func.count(EnergyFrame.id).label("frame_count"),
-            func.sum(EnergyFrame.energy).label("total_energy_wh"),
-            func.avg(EnergyFrame.power_watts).label("avg_power_watts"),
-            func.min(EnergyFrame.timestamp).label("first_seen"),
-            func.max(EnergyFrame.timestamp).label("last_seen"),
+            EnergyFrame,
         )
         .where(EnergyFrame.timestamp >= start, EnergyFrame.timestamp <= end)
-        .group_by(EnergyFrame.ecu_id)
+        .order_by(EnergyFrame.ecu_id.asc(), EnergyFrame.timestamp.asc())
     )
 
-    aggregates: dict[int, _Aggregate] = {}
-    for row in db.execute(stmt):
-        first_seen = _to_utc(row.first_seen)
-        last_seen = _to_utc(row.last_seen)
-        elapsed_seconds = max(0.0, (last_seen - first_seen).total_seconds())
+    frames_by_ecu: dict[int, list[EnergyFrame]] = defaultdict(list)
+    for frame in db.scalars(stmt):
+        frames_by_ecu[frame.ecu_id].append(frame)
 
-        aggregates[int(row.ecu_id)] = _Aggregate(
-            frame_count=int(row.frame_count or 0),
-            total_energy_wh=float(row.total_energy_wh or 0.0),
-            avg_power_watts=float(row.avg_power_watts or 0.0),
+    aggregates: dict[int, _Aggregate] = {}
+    for ecu_id, frames in frames_by_ecu.items():
+        first_seen = _to_utc(frames[0].timestamp)
+        last_seen = _to_utc(frames[-1].timestamp)
+        elapsed_seconds = max(0.0, (last_seen - first_seen).total_seconds())
+        frame_count = len(frames)
+        transmitted_energy_wh = sum(float(frame.energy) for frame in frames)
+        avg_power_watts = sum(float(frame.power_watts) for frame in frames) / frame_count
+        integrated_energy_wh = _integrated_energy_wh(frames)
+
+        aggregates[int(ecu_id)] = _Aggregate(
+            frame_count=frame_count,
+            transmitted_energy_wh=float(transmitted_energy_wh),
+            integrated_energy_wh=float(integrated_energy_wh),
+            avg_power_watts=float(avg_power_watts),
             elapsed_seconds=float(elapsed_seconds),
         )
 
@@ -85,6 +112,7 @@ def score_event_from_energy(
     end: datetime,
     metric: ScoringMetric,
     include_inactive: bool,
+    energy_source: ScoringEnergySource = ScoringEnergySource.TRANSMITTED,
 ) -> ScoringEventResponse:
     start_utc = _to_utc(start)
     end_utc = _to_utc(end)
@@ -123,7 +151,7 @@ def score_event_from_energy(
                     )
                 continue
 
-            scored_candidates.append((ecu, aggregate, _metric_value(aggregate, metric)))
+            scored_candidates.append((ecu, aggregate, _metric_value(aggregate, metric, energy_source)))
 
         entries: list[ScoringEntryResponse] = []
 
@@ -148,7 +176,10 @@ def score_event_from_energy(
                         status=ScoringStatus.SCORED,
                         score=_interpolated_score(metric_value, best_metric, worst_metric),
                         metric_value=round(metric_value, 4),
-                        total_energy_wh=round(aggregate.total_energy_wh, 4),
+                        total_energy_wh=round(
+                            _metric_value(aggregate, ScoringMetric.ENERGY_WH, energy_source),
+                            4,
+                        ),
                         avg_power_watts=round(aggregate.avg_power_watts, 4),
                         elapsed_seconds=round(aggregate.elapsed_seconds, 3),
                         frame_count=aggregate.frame_count,
@@ -172,5 +203,6 @@ def score_event_from_energy(
         start=start_utc,
         end=end_utc,
         metric=metric,
+        energy_source=energy_source,
         brackets=brackets,
     )
