@@ -1,4 +1,10 @@
 from .alert import AlertResponse
+from .competition import (
+    CompetitionCreate,
+    CompetitionDetailResponse,
+    CompetitionEventResponse,
+    CompetitionResponse,
+)
 from .ecu import ECUBase, ECUConfigure, ECUCreate, ECUResponse
 from .energy_frame import (
     EnergyFrameBatchIngest,
@@ -29,6 +35,7 @@ __all__ = [
     "FirmwareJobStatus", "FirmwareUploadResponse", "FirmwareStatusResponse", "FirmwareProgressUpdate",
     "ScoringMetric", "ScoringStatus", "ScoringEntryResponse", "ScoringBracketResponse", "ScoringEventResponse",
     "AlertResponse",
+    "CompetitionCreate", "CompetitionResponse", "CompetitionDetailResponse", "CompetitionEventResponse",
     "PowerViolationEventResponse",
     "TeamCreate", "TeamResponse", "TeamDetailResponse",
 ]
