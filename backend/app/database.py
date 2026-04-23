@@ -50,10 +50,11 @@ def init_db() -> None:
 
 	Importing models here ensures SQLAlchemy registers metadata before create_all.
 	"""
-	from app.models import Alert, ECU, EnergyFrame, PowerViolationEvent  # noqa: F401
+	from app.models import Alert, ECU, EnergyFrame, PowerViolationEvent, Team  # noqa: F401
 
 	Base.metadata.create_all(bind=engine)
 	_ensure_energy_frame_power_column()
+	_ensure_ecu_team_id_column()
 
 
 def _ensure_energy_frame_power_column() -> None:
@@ -69,3 +70,18 @@ def _ensure_energy_frame_power_column() -> None:
 	with engine.begin() as conn:
 		conn.execute(text("ALTER TABLE energy_frames ADD COLUMN power_watts FLOAT"))
 		conn.execute(text("UPDATE energy_frames SET power_watts = avg_voltage * avg_current WHERE power_watts IS NULL"))
+
+
+def _ensure_ecu_team_id_column() -> None:
+	"""Ensure legacy databases have the ECU team_id column used by team assignment APIs."""
+	inspector = inspect(engine)
+	if "ecus" not in inspector.get_table_names():
+		return
+
+	column_names = {column["name"] for column in inspector.get_columns("ecus")}
+	if "team_id" in column_names:
+		return
+
+	with engine.begin() as conn:
+		conn.execute(text("ALTER TABLE ecus ADD COLUMN team_id INTEGER"))
+		conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ecus_team_id ON ecus(team_id)"))

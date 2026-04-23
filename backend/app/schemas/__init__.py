@@ -20,6 +20,7 @@ from .scoring import (
     ScoringMetric,
     ScoringStatus,
 )
+from .team import TeamCreate, TeamDetailResponse, TeamResponse
 
 __all__ = [
     "ECUBase", "ECUCreate", "ECUConfigure", "ECUResponse",
@@ -29,4 +30,5 @@ __all__ = [
     "ScoringMetric", "ScoringStatus", "ScoringEntryResponse", "ScoringBracketResponse", "ScoringEventResponse",
     "AlertResponse",
     "PowerViolationEventResponse",
+    "TeamCreate", "TeamResponse", "TeamDetailResponse",
 ]

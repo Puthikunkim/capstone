@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, Float, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -31,6 +31,7 @@ class ECU(Base):
 
 	id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 	serial_number: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+	team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
 	team_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 	vehicle_class: Mapped[VehicleClass] = mapped_column(
 		SAEnum(VehicleClass, name="vehicle_class", native_enum=False),
@@ -54,6 +55,7 @@ class ECU(Base):
 		cascade="all, delete-orphan",
 		passive_deletes=True,
 	) # An ECU can have many energy frames, if an ECU is deleted, we want all its frames to be deleted as well, and we want the database to handle this cascade for integrity and performance
+	team = relationship("Team", back_populates="ecus")
 	alerts = relationship(
 		"Alert",
 		back_populates="ecu",
