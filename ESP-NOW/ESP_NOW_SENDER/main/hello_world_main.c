@@ -13,6 +13,10 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
+// ── [ADDED] time sync headers ──────────────────────────────────
+#include <time.h>
+// ───────────────────────────────────────────────────────────────
+
 static const char *TAG = "SENDER";
 
 // ====== Config ======
@@ -42,10 +46,21 @@ typedef struct {
     uint8_t  sender_mac[6];
 } __attribute__((packed)) register_packet_t;
 
+// ── [MODIFIED] welcome_packet_t — added timestamp field ────────
+// Original:
+// typedef struct {
+//     uint8_t  msg_type;
+//     uint8_t  assigned_id;
+// } __attribute__((packed)) welcome_packet_t;
+//
+// Changed: must match controller's struct — added sync_timestamp
+// so this sender can anchor real wall-clock time from the backend
 typedef struct {
     uint8_t  msg_type;
     uint8_t  assigned_id;
+    char     sync_timestamp[32];  // [ADDED] ISO UTC timestamp from controller
 } __attribute__((packed)) welcome_packet_t;
+// ───────────────────────────────────────────────────────────────
 
 typedef struct {
     uint16_t counter;
@@ -67,24 +82,22 @@ typedef struct {
     uint16_t confirmed_floor;
 } __attribute__((packed)) ack_packet_t;
 
-// ====== sending buffer ======
+// ====== Sending buffer ======
 typedef struct {
     uint16_t counter;
     uint16_t time_100ms;
-
-    uint8_t current_packed[15];
-    uint8_t voltage_packed[15];
-
+    uint8_t  current_packed[15];
+    uint8_t  voltage_packed[15];
 } buffered_frame_t;
 
 static buffered_frame_t send_buffer[SENDER_BUFFER_SIZE];
 static uint16_t next_counter     = 0;
 static uint16_t confirmed_floor  = 0;
 
-// ====== status ======
+// ====== Status ======
 static uint8_t  my_mac[6];
 static uint8_t  controller_mac[6];
-static uint8_t  my_id            = 0;       // 0 = unassigned
+static uint8_t  my_id            = 0;
 static bool     registered       = false;
 static volatile bool waiting_ack = false;
 static volatile int64_t last_send_time = 0;
@@ -95,52 +108,87 @@ static uint16_t disconnect_first_frame = 0;
 static uint8_t  consecutive_timeouts   = 0;
 #define DISCONNECT_THRESHOLD  3
 
+// ── [ADDED] time sync state ────────────────────────────────────
+// Anchors real wall-clock time to this sender's monotonic timer.
+// sync_timestamp: ISO string received from controller in WELCOME.
+// sync_boot_us:   esp_timer value at the moment WELCOME arrived.
+// Both recorded simultaneously so offset arithmetic is accurate.
+//
+// [OPTIMISED] sync_base_us precomputes (base_epoch * 1e6 + us)
+// once at sync time so compute_frame_timestamp never needs to
+// call strptime/mktime again — hot path is 3 integer ops only.
+static char    sync_timestamp[32] = {0};
+static int64_t sync_boot_us       = 0;
+static int64_t sync_base_us       = 0;  // [ADDED] precomputed epoch anchor
+static bool    time_synced        = false;
+// ───────────────────────────────────────────────────────────────
+
 // ====== ADC ======
 static adc_oneshot_unit_handle_t adc1_handle;
 static adc_cali_handle_t adc1_cali_current = NULL;
 static adc_cali_handle_t adc1_cali_voltage = NULL;
 static adc_channel_t channels[2] = {ADC_CURRENT_CHANNEL, ADC_VOLTAGE_CHANNEL};
 
-void sender_task(void *arg);  
+void sender_task(void *arg);
+
+/*---------------------------------------------------------------
+    [ADDED] Compute real ISO timestamp for a given frame.
+    frame_boot_us: the esp_timer value recorded when the frame
+    was sampled (i.e. f->time_100ms * 100000).
+    Uses sync_base_us (precomputed once at WELCOME time) plus
+    the offset from sync_boot_us — no string parsing on hot path.
+    Output written into `out` buffer of size `len`.
+---------------------------------------------------------------*/
+static void compute_frame_timestamp(int64_t frame_boot_us,
+                                    char *out, size_t len) {
+    if (!time_synced) {
+        strncpy(out, "1970-01-01T00:00:00.000000", len);
+        return;
+    }
+
+    // [OPTIMISED] hot path: 3 integer ops, no strptime/mktime
+    int64_t total_us  = sync_base_us + (frame_boot_us - sync_boot_us);
+    time_t  final_sec = total_us / 1000000LL;
+    int     final_us  = (int)(total_us % 1000000LL);
+
+    struct tm *final_tm = gmtime(&final_sec);
+    snprintf(out, len,
+             "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
+             final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
+             final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
+}
 
 /*---------------------------------------------------------------
     Buffer management
 ---------------------------------------------------------------*/
-static void pack_12bit(const uint16_t *in, uint8_t *out, int count)
-{
+static void pack_12bit(const uint16_t *in, uint8_t *out, int count) {
     int j = 0;
     for (int i = 0; i < count; i += 2) {
         uint16_t a = in[i] & 0x0FFF;
         uint16_t b = (i + 1 < count) ? (in[i + 1] & 0x0FFF) : 0;
-
         out[j++] = a & 0xFF;
         out[j++] = ((a >> 8) & 0x0F) | ((b & 0x0F) << 4);
         out[j++] = (b >> 4) & 0xFF;
     }
 }
 
-static void unpack_12bit(const uint8_t *in, uint16_t *out, int count)
-{
+static void unpack_12bit(const uint8_t *in, uint16_t *out, int count) {
     int j = 0;
     for (int i = 0; i < count; i += 2) {
         uint8_t b0 = in[j++];
         uint8_t b1 = in[j++];
         uint8_t b2 = in[j++];
-
         out[i] = b0 | ((b1 & 0x0F) << 8);
-
-        if (i + 1 < count) {
+        if (i + 1 < count)
             out[i + 1] = ((b1 >> 4) & 0x0F) | (b2 << 4);
-        }
     }
 }
 
-static void buffer_push(int16_t *current_mv, int16_t *voltage_mv)
-{
+static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
     uint16_t slot = next_counter % SENDER_BUFFER_SIZE;
     buffered_frame_t *f = &send_buffer[slot];
 
-    f->counter = next_counter;
+    f->counter    = next_counter;
     f->time_100ms = (uint16_t)(esp_timer_get_time() / 100000);
 
     uint16_t tmp_c[SAMPLES_PER_FRAME];
@@ -154,16 +202,15 @@ static void buffer_push(int16_t *current_mv, int16_t *voltage_mv)
     pack_12bit(tmp_c, f->current_packed, SAMPLES_PER_FRAME);
     pack_12bit(tmp_v, f->voltage_packed, SAMPLES_PER_FRAME);
 
-    if ((next_counter - confirmed_floor) >= SENDER_BUFFER_SIZE) {
+    if ((next_counter - confirmed_floor) >= SENDER_BUFFER_SIZE)
         confirmed_floor = next_counter - SENDER_BUFFER_SIZE + 1;
-    }
 
     next_counter++;
 }
 
 static void buffer_clear_acked(uint16_t floor) {
-    confirmed_floor       = floor;
-    consecutive_timeouts  = 0; 
+    confirmed_floor      = floor;
+    consecutive_timeouts = 0;
 
     if (is_disconnected) {
         is_disconnected = false;
@@ -172,6 +219,7 @@ static void buffer_clear_acked(uint16_t floor) {
 
     ESP_LOGI(TAG, "Confirmed floor→%d", floor);
 }
+
 static uint8_t build_packet(adc_packet_t *pkt) {
     pkt->msg_type    = MSG_DATA;
     pkt->sender_id   = my_id;
@@ -191,13 +239,19 @@ static uint8_t build_packet(adc_packet_t *pkt) {
 
         dst->counter = f->counter;
 
-        // Reconstruct timestamp (10 frames/sec → 100ms per frame)
-        dst->time_since_boot_ms = f->counter * 100;
+        // ── [MODIFIED] time_since_boot_ms now uses real timestamp ──
+        // Original:
+        // dst->time_since_boot_ms = f->counter * 100;
+        //
+        // Changed: compute the actual boot-relative microsecond value
+        // from f->time_100ms so compute_frame_timestamp can derive
+        // the correct absolute wall-clock time on the backend.
+        dst->time_since_boot_ms = (uint32_t)f->time_100ms * 100;  // [MODIFIED]
+        // ─────────────────────────────────────────────────────────
 
         uint16_t tmp_current[SAMPLES_PER_FRAME];
         uint16_t tmp_voltage[SAMPLES_PER_FRAME];
 
-        // Unpack back to original format
         unpack_12bit(f->current_packed, tmp_current, SAMPLES_PER_FRAME);
         unpack_12bit(f->voltage_packed, tmp_voltage, SAMPLES_PER_FRAME);
 
@@ -211,7 +265,7 @@ static uint8_t build_packet(adc_packet_t *pkt) {
 }
 
 /*---------------------------------------------------------------
-    ESP-NOW callback
+    ESP-NOW callbacks
 ---------------------------------------------------------------*/
 
 static void on_data_sent(const uint8_t *mac, esp_now_send_status_t status) {
@@ -241,7 +295,10 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     if (len < 1) return;
     uint8_t msg_type = data[0];
 
-    // ── HELLO：Controller broadcast, reply REGISTER  ──
+    ESP_LOGW(TAG, "RX msg=%d len=%d expected=%d",
+             msg_type, len, sizeof(welcome_packet_t));
+
+    // ── HELLO: Controller broadcast, reply REGISTER ──
     if (msg_type == MSG_HELLO && len == sizeof(hello_packet_t)) {
         const hello_packet_t *hello = (const hello_packet_t *)data;
 
@@ -264,12 +321,44 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         return;
     }
 
-    // ── WELCOME：save ID and start ADC sampling ──
+    // ── WELCOME: save ID and start ADC sampling ──
     if (msg_type == MSG_WELCOME && len == sizeof(welcome_packet_t)) {
         const welcome_packet_t *welcome = (const welcome_packet_t *)data;
         my_id      = welcome->assigned_id;
         registered = true;
-        ESP_LOGI(TAG, "Registered! Assigned ID = %d", my_id);
+
+        // ── [ADDED] record time sync anchor from WELCOME ────────
+        // Both values captured at the same instant so the offset
+        // arithmetic in compute_frame_timestamp stays accurate.
+        strncpy(sync_timestamp, welcome->sync_timestamp,
+                sizeof(sync_timestamp));
+        sync_boot_us = esp_timer_get_time();  // anchor monotonic clock
+
+        // [ADDED] precompute sync_base_us once here so the hot path
+        // in compute_frame_timestamp never calls strptime/mktime again
+        {
+            char base_no_us[32];
+            int us = 0;
+            char *dot = strchr(sync_timestamp, '.');
+            if (dot) {
+                size_t base_len = dot - sync_timestamp;
+                strncpy(base_no_us, sync_timestamp, base_len);
+                base_no_us[base_len] = '\0';
+                us = atoi(dot + 1);
+            } else {
+                strncpy(base_no_us, sync_timestamp, sizeof(base_no_us));
+            }
+            struct tm tm_base = {0};
+            strptime(base_no_us, "%Y-%m-%dT%H:%M:%S", &tm_base);
+            time_t base_epoch = mktime(&tm_base);
+            sync_base_us = (int64_t)base_epoch * 1000000LL + us;
+        }
+
+        time_synced = true;
+        // ────────────────────────────────────────────────────────
+
+        ESP_LOGI(TAG, "Registered! Assigned ID = %d, sync time = %s",
+                 my_id, sync_timestamp); // [MODIFIED] log includes timestamp
         xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, NULL);
         return;
     }
@@ -345,7 +434,7 @@ static void wifi_init(void) {
 }
 
 /*---------------------------------------------------------------
-    Sender Task（Start after receiving WELCOME）
+    Sender Task (starts after receiving WELCOME)
 ---------------------------------------------------------------*/
 
 void sender_task(void *arg) {
@@ -359,7 +448,7 @@ void sender_task(void *arg) {
     while (1) {
         int64_t now = esp_timer_get_time() / 1000;
 
-        // 100Hz sampling rate
+        // 100Hz sampling
         if (now - last_sample_time >= 10) {
             last_sample_time = now;
             int raw_c, raw_v, mv_c, mv_v;
@@ -375,44 +464,51 @@ void sender_task(void *arg) {
             sample_index++;
         }
 
-        // get 10 -> add in the buffer
         if (sample_index >= SAMPLES_PER_FRAME) {
             buffer_push(current_buf, voltage_buf);
             sample_index = 0;
 
-        if (waiting_ack && (now - last_send_time > ACK_TIMEOUT_MS)) {
-            waiting_ack = false;
-            consecutive_timeouts++;
+            if (waiting_ack && (now - last_send_time > ACK_TIMEOUT_MS)) {
+                waiting_ack = false;
+                consecutive_timeouts++;
 
-            if (consecutive_timeouts >= DISCONNECT_THRESHOLD && !is_disconnected) {
-                is_disconnected        = true;
-                disconnect_time_ms     = now;
-                disconnect_first_frame = confirmed_floor + 1;
+                if (consecutive_timeouts >= DISCONNECT_THRESHOLD && !is_disconnected) {
+                    is_disconnected        = true;
+                    disconnect_time_ms     = now;
+                    disconnect_first_frame = confirmed_floor + 1;
 
-                ESP_LOGW(TAG, "=== DISCONNECTED (ack timeout %d times) ===",
-                        consecutive_timeouts);
-                ESP_LOGW(TAG, "First frame in buffer: counter=%d  time_100ms=%d",
-                        disconnect_first_frame,
-                        send_buffer[disconnect_first_frame % SENDER_BUFFER_SIZE].time_100ms);
-            } else if (!is_disconnected) {
-                ESP_LOGW(TAG, "ACK timeout (%d/%d), bundling with next frame",
-                        consecutive_timeouts, DISCONNECT_THRESHOLD);
+                    ESP_LOGW(TAG, "=== DISCONNECTED (ack timeout %d times) ===",
+                             consecutive_timeouts);
+                    ESP_LOGW(TAG, "First frame in buffer: counter=%d  time_100ms=%d",
+                             disconnect_first_frame,
+                             send_buffer[disconnect_first_frame % SENDER_BUFFER_SIZE].time_100ms);
+                } else if (!is_disconnected) {
+                    ESP_LOGW(TAG, "ACK timeout (%d/%d), bundling with next frame",
+                             consecutive_timeouts, DISCONNECT_THRESHOLD);
+                }
             }
-        }
 
-            // send in a pack. AT MOST THREE FRAME!!!
             if (!waiting_ack) {
                 adc_packet_t pkt;
                 uint8_t count = build_packet(&pkt);
                 if (count > 0) {
+                    // ── [ADDED] log real timestamp of first frame ──
+                    if (time_synced) {
+                        char ts[32];
+                        int64_t frame_us =
+                            (int64_t)pkt.frames[0].time_since_boot_ms * 1000LL;
+                        compute_frame_timestamp(frame_us, ts, sizeof(ts));
+                        ESP_LOGI(TAG, "Sent %d frame(s), counter %d~%d, first ts: %s",
+                                 count,
+                                 pkt.frames[0].counter,
+                                 pkt.frames[count - 1].counter,
+                                 ts);
+                    }
+                    // ──────────────────────────────────────────────
                     esp_now_send(controller_mac,
                                  (uint8_t *)&pkt, sizeof(pkt));
                     waiting_ack    = true;
                     last_send_time = now;
-                    ESP_LOGI(TAG, "Sent %d frame(s), counter %d~%d",
-                             count,
-                             pkt.frames[0].counter,
-                             pkt.frames[count - 1].counter);
                 }
             }
         }
@@ -422,7 +518,7 @@ void sender_task(void *arg) {
 }
 
 /*---------------------------------------------------------------
-    buffer_monitor_task
+    Buffer monitor task
 ---------------------------------------------------------------*/
 static void buffer_monitor_task(void *arg) {
     int64_t last_print_ms = 0;
@@ -431,7 +527,7 @@ static void buffer_monitor_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(500));
 
         if (!is_disconnected) {
-            last_print_ms = 0;  
+            last_print_ms = 0;
             continue;
         }
 
@@ -441,14 +537,14 @@ static void buffer_monitor_task(void *arg) {
         if (last_print_ms == 0 || (now - last_print_ms >= 5000)) {
             last_print_ms = now;
 
-            uint16_t first_counter = confirmed_floor + 1;
-            uint16_t last_counter  = next_counter - 1;
+            uint16_t first_counter   = confirmed_floor + 1;
+            uint16_t last_counter    = next_counter - 1;
             uint16_t buffered_frames = next_counter - confirmed_floor - 1;
 
             buffered_frame_t *first_f =
                 &send_buffer[first_counter % SENDER_BUFFER_SIZE];
-            buffered_frame_t *last_f  =
-                &send_buffer[last_counter  % SENDER_BUFFER_SIZE];
+            buffered_frame_t *last_f =
+                &send_buffer[last_counter % SENDER_BUFFER_SIZE];
 
             ESP_LOGW(TAG, "─────── Buffer Status ───────");
             ESP_LOGW(TAG, "Disconnected for: %lld ms (%.1f sec)",
@@ -467,12 +563,11 @@ static void buffer_monitor_task(void *arg) {
             if (disconnected_for_ms >= 300000 && disconnected_for_ms < 305000) {
                 ESP_LOGW(TAG, "★ 5 MINUTES REACHED ★");
                 ESP_LOGW(TAG, "Expected: 3000  Actual: %d", buffered_frames);
-                if (buffered_frames >= 2950) {
+                if (buffered_frames >= 2950)
                     ESP_LOGI(TAG, "✅ Buffer test PASSED");
-                } else {
+                else
                     ESP_LOGE(TAG, "❌ Buffer test FAILED, lost %d frames",
                              3000 - buffered_frames);
-                }
             }
             ESP_LOGW(TAG, "─────────────────────────────");
         }
@@ -496,7 +591,6 @@ void app_main(void) {
     esp_now_register_send_cb(on_data_sent);
     esp_now_register_recv_cb(on_data_recv);
 
-    // 启动buffer监控task
     xTaskCreate(buffer_monitor_task, "buf_monitor", 2048, NULL, 2, NULL);
 
     ESP_LOGI(TAG, "Sender ready, waiting for HELLO from controller...");
