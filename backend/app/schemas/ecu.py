@@ -12,7 +12,7 @@ from app.models.ecu import VehicleClass, VehicleType
 
 
 class ECUBase(BaseModel):
-    serial_number: int
+    serial_number: str
     team_number: int
     vehicle_class: VehicleClass
     vehicle_type: VehicleType

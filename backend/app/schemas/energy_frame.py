@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 
 class EnergyFrameIngest(BaseModel):
-    ecu_serial: int           # identifies which ECU sent the frame
+    ecu_serial: str           # identifies which ECU sent the frame (MAC address)
     timestamp: datetime       # ISO 8601 timestamp from ESP32
     voltage_samples: list[int]  # raw 12-bit ADC values (0-4095)
     current_samples: list[int]  # raw 12-bit ADC values (0-4095)

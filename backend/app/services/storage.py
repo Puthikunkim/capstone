@@ -106,7 +106,7 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 # This is used when processing incoming frames to ensure we have an ECU record to associate 
 # with the frame and any potential alerts.
 def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) -> ECU:
-	serial_number = int(frame_payload["ecu_serial"])
+	serial_number = str(frame_payload["ecu_serial"])
 	ecu = db.scalar(select(ECU).where(ECU.serial_number == serial_number))
 	if ecu is not None:
 		return ecu
