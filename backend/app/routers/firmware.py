@@ -18,7 +18,6 @@ from app.schemas.firmware import (
     FirmwareStatusResponse,
     FirmwareUploadResponse,
 )
-from app.services.broadcast import manager
 from app.services.storage import get_ecu, set_ecu_firmware_version
 
 router = APIRouter(tags=["firmware"])
@@ -155,16 +154,7 @@ async def upload_firmware(
         "error_message": None,
     }
 
-    await manager.notify(
-        f"control_{ecu_id}",
-        {
-            "type": "ota_update",
-            "download_url": f"/api/{ecu_id}/firmware/download",
-            "filename": dest.name,
-            "size_bytes": size_bytes,
-            "checksum_sha256": checksum_sha256,
-        },
-    )
+    # OTA notification now sent over serial — serial_reader.py handles delivery to ESP32
 
     return FirmwareUploadResponse(
         ecu_id=ecu_id,

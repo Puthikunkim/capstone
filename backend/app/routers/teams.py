@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.ecu import ECUResponse
 from app.schemas.team import TeamCreate, TeamDetailResponse, TeamResponse
-from app.services.broadcast import manager
 from app.services.storage import get_ecu
 from app.services.teams import (
     ECUAssignmentConflictError,
@@ -21,18 +20,6 @@ from app.services.teams import (
 )
 
 router = APIRouter(prefix="/teams", tags=["teams"])
-
-
-def _config_update_payload(ecu) -> dict[str, object]:
-    return {
-        "type": "config_update",
-        "ecu_id": ecu.id,
-        "serial_number": ecu.serial_number,
-        "team_number": ecu.team_number,
-        "vehicle_class": ecu.vehicle_class.value,
-        "vehicle_type": ecu.vehicle_type.value,
-        "power_limit_watts": ecu.power_limit_watts,
-    }
 
 
 @router.post("/", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
@@ -78,7 +65,7 @@ def list_ecus_for_team(team_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{team_id}/assign/{ecu_id}", response_model=ECUResponse)
-async def assign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
+def assign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
     team = get_team(db, team_id)
     if team is None:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -88,16 +75,13 @@ async def assign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="ECU not found")
 
     try:
-        updated_ecu = assign_team_to_ecu(db, team, ecu)
+        return assign_team_to_ecu(db, team, ecu)
     except ECUAssignmentConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    await manager.notify(f"control_{ecu_id}", _config_update_payload(updated_ecu))
-    return updated_ecu
 
 
 @router.post("/{team_id}/unassign/{ecu_id}", response_model=ECUResponse)
-async def unassign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
+def unassign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
     team = get_team(db, team_id)
     if team is None:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -107,9 +91,6 @@ async def unassign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="ECU not found")
 
     try:
-        updated_ecu = unassign_team_from_ecu(db, team, ecu)
+        return unassign_team_from_ecu(db, team, ecu)
     except ECUAssignmentConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    await manager.notify(f"control_{ecu_id}", _config_update_payload(updated_ecu))
-    return updated_ecu
