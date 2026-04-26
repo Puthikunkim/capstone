@@ -161,7 +161,7 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 		avg_voltage=float(payload["avg_voltage"]),
 		avg_current=float(payload["avg_current"]),
 		power_watts=float(payload["avg_voltage"]) * float(payload["avg_current"]),
-		energy=float(payload["energy"]),
+		energy=0.0,
 	)
 	db.add(frame)
 	db.commit()
