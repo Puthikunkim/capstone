@@ -84,7 +84,12 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 		ecu.power_limit_watts = float(updates["power_limit_watts"])
 
 	if "last_seen" in updates and updates["last_seen"] is not None:
-		ecu.last_seen = _to_utc(updates["last_seen"])
+		incoming_last_seen = _to_utc(updates["last_seen"])
+		current_last_seen = _to_utc(ecu.last_seen)
+		if current_last_seen is None or (
+			incoming_last_seen is not None and incoming_last_seen > current_last_seen
+		):
+			ecu.last_seen = incoming_last_seen
 
 	if "temperature" in updates and updates["temperature"] is not None:
 		ecu.temperature = float(updates["temperature"])
@@ -121,7 +126,7 @@ def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) 
 	db.flush()
 	return ecu
 
-def save_frame(db: Session, frame_data: Any) -> EnergyFrame:
+def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 	payload = _to_dict(frame_data)
 	ecu = _get_or_create_ecu_by_serial(db, payload)
 	_apply_ecu_updates(
@@ -148,19 +153,20 @@ def save_frame(db: Session, frame_data: Any) -> EnergyFrame:
 	if existing_frame is not None:
 		db.commit()
 		db.refresh(existing_frame)
-		return existing_frame
+		return existing_frame, False
 
 	frame = EnergyFrame(
 		ecu_id=ecu.id,
 		timestamp=frame_timestamp,
 		avg_voltage=float(payload["avg_voltage"]),
 		avg_current=float(payload["avg_current"]),
+		power_watts=float(payload["avg_voltage"]) * float(payload["avg_current"]),
 		energy=float(payload["energy"]),
 	)
 	db.add(frame)
 	db.commit()
 	db.refresh(frame)
-	return frame
+	return frame, True
 
 # Checks if the given energy frame breaches the power limit of its associated ECU and records an alert if necessary.
 def check_and_record_alert(db: Session, frame: EnergyFrame, ecu: ECU | None = None) -> Alert | None:
@@ -168,12 +174,11 @@ def check_and_record_alert(db: Session, frame: EnergyFrame, ecu: ECU | None = No
 	if attached_ecu is None:
 		return None
 
-    # Calculate power in watts from the frame's voltage and current.
-	power_watts = float(frame.avg_voltage) * float(frame.avg_current)
+	power_watts = float(frame.power_watts)
 	if power_watts <= float(attached_ecu.power_limit_watts):
 		return None
 
-    # Before creating a new alert, check if an alert for this frame already exists to prevent duplicates, which could happen if the same frame is processed multiple times due to network issues or retries.
+	# Before creating a new alert, check if an alert for this frame already exists to prevent duplicates, which could happen if the same frame is processed multiple times due to network issues or retries.
 	existing_alert = db.scalar(select(Alert).where(Alert.frame_id == frame.id))
 	if existing_alert is not None:
 		return existing_alert
@@ -228,6 +233,17 @@ def configure_ecu(db: Session, ecu_id: int, updates: Any) -> ECU | None:
 
 	payload = _to_dict(updates)
 	_apply_ecu_updates(ecu, payload)
+	db.commit()
+	db.refresh(ecu)
+	return ecu
+
+
+def set_ecu_firmware_version(db: Session, ecu_id: int, firmware_version: str) -> ECU | None:
+	ecu = db.get(ECU, ecu_id)
+	if ecu is None:
+		return None
+
+	ecu.firmware_version = firmware_version
 	db.commit()
 	db.refresh(ecu)
 	return ecu

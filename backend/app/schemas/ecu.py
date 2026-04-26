@@ -34,6 +34,7 @@ class ECUConfigure(BaseModel):
 
 class ECUResponse(ECUBase):
     id: int
+    team_id: int | None
     last_seen: datetime | None
     temperature: float | None
     flash_usage: int | None

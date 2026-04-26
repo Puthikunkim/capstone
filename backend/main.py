@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import alerts, data, ecu, firmware, websocket
+from app.routers import competitions, alerts, data, ecu, firmware, scoring, teams, violations, websocket
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,10 @@ def create_app() -> FastAPI:
     app.include_router(ecu.router, prefix="/api")
     app.include_router(alerts.router, prefix="/api")
     app.include_router(firmware.router, prefix="/api")
+    app.include_router(scoring.router, prefix="/api")
+    app.include_router(competitions.router, prefix="/api")
+    app.include_router(teams.router, prefix="/api")
+    app.include_router(violations.router, prefix="/api")
     app.include_router(websocket.router)
     logger.info("All routers registered")
 

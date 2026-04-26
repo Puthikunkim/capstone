@@ -31,6 +31,42 @@ async def ws_alerts(websocket: WebSocket) -> None:
         await manager.disconnect(channel, websocket)
 
 
+@router.websocket("/ws/violations")
+async def ws_violations(websocket: WebSocket) -> None:
+    """Subscribe to power violation lifecycle notifications.
+
+    The server pushes a JSON object when a violation event starts or ends.
+    Clients should not send anything; the connection is receive-only.
+    """
+    channel = "violations"
+    await manager.connect(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.disconnect(channel, websocket)
+
+
+@router.websocket("/ws/control/{ecu_id}")
+async def ws_ecu_control(websocket: WebSocket, ecu_id: int) -> None:
+    """Subscribe an ECU device to control-channel commands.
+
+    The server pushes OTA/config JSON messages to this channel.
+    Clients may send heartbeats; payloads are ignored.
+    """
+    channel = f"control_{ecu_id}"
+    await manager.connect(channel, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await manager.disconnect(channel, websocket)
+
+
 @router.websocket("/ws/{ecu_id}")
 async def ws_ecu_frames(websocket: WebSocket, ecu_id: int) -> None:
     """Subscribe to live energy frame updates for a specific ECU.

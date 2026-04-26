@@ -67,6 +67,29 @@ class ConnectionManager:
         }
         await self.notify("alerts", payload)
 
+    async def notify_violation_event(self, event: Any, transition: str) -> None:
+        """Serialize a PowerViolationEvent and push it to the global 'violations' channel."""
+
+        def _dt(value: datetime | None) -> str | None:
+            return value.isoformat() if value is not None else None
+
+        payload: dict[str, Any] = {
+            "type": "violation_event",
+            "transition": transition,
+            "id": event.id,
+            "ecu_id": event.ecu_id,
+            "start_timestamp": _dt(event.start_timestamp),
+            "last_over_timestamp": _dt(event.last_over_timestamp),
+            "end_timestamp": _dt(event.end_timestamp),
+            "duration_seconds": event.duration_seconds,
+            "penalty_seconds": event.penalty_seconds,
+            "limit_watts": event.limit_watts,
+            "peak_power_watts": event.peak_power_watts,
+            "frame_count": event.frame_count,
+            "is_warning": event.is_warning,
+        }
+        await self.notify("violations", payload)
+
 
 # Module-level singleton shared by all routers.
 manager = ConnectionManager()
