@@ -1,221 +1,335 @@
+// controller/main/main.c
 #include <stdio.h>
 #include <string.h>
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
-#include "esp_sntp.h"
-#include "esp_netif.h"
-#include "esp_netif_sntp.h"
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"   
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <time.h>                // time_t, struct tm
-#include <sys/time.h>            // gettimeofday
+#include "esp_timer.h"
+#include "esp_log.h"
+#include "driver/uart.h"
 
 static const char *TAG = "CONTROLLER";
 
-#define WIFI_SSID "testing"
-#define WIFI_PASS "66666666"
+// ====== Config ======
+#define UART_PORT             UART_NUM_0
+#define UART_BAUD             115200
+#define HELLO_INTERVAL_MS     1000
+#define DISCONNECT_TIMEOUT_US 300000000LL
+#define MAX_NODES             20
+#define SAMPLES_PER_FRAME     10
+#define MAX_FRAMES_PER_PKT    3
 
-#define SAMPLES_PER_FRAME 10
+// ====== Messgae type ======
+#define MSG_HELLO     0x01  // Controller broadcasting
+#define MSG_REGISTER  0x02  // Sender → Controller
+#define MSG_WELCOME   0x03  // Controller → Sender
+#define MSG_DATA      0x04  // Sender → Controller
+#define MSG_ACK       0x05  // Controller → Sender
 
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-
-static EventGroupHandle_t wifi_event_group;
-
-static uint8_t sender1_mac[] = {0x20, 0xE7, 0xC8, 0xEC, 0xDC, 0xB8};
-static uint8_t sender2_mac[] = {0x20, 0xE7, 0xC8, 0xEC, 0xE1, 0x98};
+// ====== Data schema ======
+typedef struct {
+    uint8_t  msg_type;        // MSG_HELLO
+    uint8_t  controller_mac[6];
+} __attribute__((packed)) hello_packet_t;
 
 typedef struct {
-    uint8_t  sender_id;           
-    uint32_t counter;             
-    int      current_ma[SAMPLES_PER_FRAME];  
-    int      voltage_mv[SAMPLES_PER_FRAME];  
+    uint8_t  msg_type;        // MSG_REGISTER
+    uint8_t  sender_mac[6];
+} __attribute__((packed)) register_packet_t;
+
+typedef struct {
+    uint8_t  msg_type;        // MSG_WELCOME
+    uint8_t  assigned_id;     // Controller assigned ID
+} __attribute__((packed)) welcome_packet_t;
+
+typedef struct {
+    uint16_t counter;
+    uint32_t time_since_boot_ms;
+    int16_t  current_mv[SAMPLES_PER_FRAME];
+    int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
 
-// ACK sructure
 typedef struct {
+    uint8_t    msg_type;      // MSG_DATA
+    uint8_t    sender_id;
+    uint8_t    frame_count;
+    adc_frame_t frames[MAX_FRAMES_PER_PKT];
+} __attribute__((packed)) adc_packet_t;
+
+typedef struct {
+    uint8_t  msg_type;        // MSG_ACK
     uint8_t  ack_to;
-    uint32_t ack_counter;
-    uint8_t  success;
+    uint16_t confirmed_floor;
 } __attribute__((packed)) ack_packet_t;
 
+// ====== Node Registry ======
+typedef enum {
+    NODE_WAITING      = 0,
+    NODE_STREAMING    = 1,
+    NODE_DISCONNECTED = 2,
+} node_status_t;
 
+typedef struct {
+    uint8_t  mac[6];
+    uint8_t  ecu_id;
+    uint16_t confirmed_floor;
+    int64_t  last_seen_us;
+    node_status_t  status;
+} node_state_t;
 
-// ACK send back
-static void send_ack(const uint8_t *mac, uint8_t sender_id, uint32_t counter) {
-    ack_packet_t ack = {
-        .ack_to      = sender_id,
-        .ack_counter = counter,
-        .success     = 1,
-    };
+static node_state_t registry[MAX_NODES];
+static uint8_t      registry_count = 0;
+static uint8_t      my_mac[6];
 
-    esp_err_t ret = esp_now_send(mac, (uint8_t *)&ack, sizeof(ack));
-    if (ret == ESP_OK) {
-        printf("[ACK] Sent to Sender%d (counter=%lu)\n", sender_id, (unsigned long)counter);
-    } else {
-        printf("[ACK] Failed to Sender%d: %s\n", sender_id, esp_err_to_name(ret));
+/*---------------------------------------------------------------
+    Registry management
+---------------------------------------------------------------*/
+
+static node_state_t *find_node_by_mac(const uint8_t *mac) {
+    for (int i = 0; i < registry_count; i++) {
+        if (memcmp(registry[i].mac, mac, 6) == 0)
+            return &registry[i];
     }
+    return NULL;
 }
 
+static node_state_t *register_node(const uint8_t *mac) {
+    node_state_t *existing = find_node_by_mac(mac);
+    if (existing) {
+        existing->status      = NODE_STREAMING;
+        existing->last_seen_us = esp_timer_get_time();
+        ESP_LOGI(TAG, "ECU%d reconnected", existing->ecu_id);
+        return existing;
+    }
+
+    if (registry_count >= MAX_NODES) {
+        ESP_LOGE(TAG, "Registry full!");
+        return NULL;
+    }
+
+    node_state_t *node = &registry[registry_count++];
+    memcpy(node->mac, mac, 6);
+    node->ecu_id          = registry_count;
+    node->confirmed_floor = 0;
+    node->last_seen_us    = esp_timer_get_time();
+    node->status          = NODE_STREAMING;
+
+    ESP_LOGI(TAG, "New node registered: ECU%d MAC=%02X:%02X:%02X:%02X:%02X:%02X",
+             node->ecu_id,
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return node;
+}
+
+/*---------------------------------------------------------------
+    Peer management
+---------------------------------------------------------------*/
+
 static void add_peer(const uint8_t *mac) {
+    if (esp_now_is_peer_exist(mac)) return;
     esp_now_peer_info_t peer = {};
     memcpy(peer.peer_addr, mac, 6);
     peer.channel = 0;
     peer.encrypt = false;
     if (esp_now_add_peer(&peer) != ESP_OK) {
-        printf("[PEER] Failed to add %02X:%02X:%02X:%02X:%02X:%02X\n",
-               mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        ESP_LOGE(TAG, "Failed to add peer");
     }
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                                int32_t event_id, void *event_data) {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "WiFi disconnected, retrying...");
-        esp_wifi_connect();
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+/*---------------------------------------------------------------
+    UART JSON output
+---------------------------------------------------------------*/
+
+static void uart_send_json(const adc_packet_t *pkt, uint32_t rx_time_ms) {
+    char buf[600];
+    int pos = 0;
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos,
+                    "{\"ecu_id\":%d,\"rx_time_ms\":%lu,\"frames\":[",
+                    pkt->sender_id, (unsigned long)rx_time_ms);
+
+    for (int f = 0; f < pkt->frame_count; f++) {
+        const adc_frame_t *frame = &pkt->frames[f];
+
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+                        "{\"counter\":%d,\"tx_time_ms\":%lu,\"voltage\":[",
+                        frame->counter,
+                        (unsigned long)frame->time_since_boot_ms);
+
+        for (int i = 0; i < SAMPLES_PER_FRAME; i++)
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%d%s", frame->voltage_mv[i],
+                            i < SAMPLES_PER_FRAME - 1 ? "," : "");
+
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"current\":[");
+
+        for (int i = 0; i < SAMPLES_PER_FRAME; i++)
+            pos += snprintf(buf + pos, sizeof(buf) - pos,
+                            "%d%s", frame->current_mv[i],
+                            i < SAMPLES_PER_FRAME - 1 ? "," : "");
+
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+                        "]}%s", f < pkt->frame_count - 1 ? "," : "");
+    }
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "]}\n");
+    uart_write_bytes(UART_PORT, buf, pos);
+}
+
+/*---------------------------------------------------------------
+    ESP-NOW recieve callback
+---------------------------------------------------------------*/
+
+static void on_data_recv(const esp_now_recv_info_t *info,
+                         const uint8_t *data, int len) {
+    if (len < 1) return;
+    uint8_t msg_type = data[0];
+
+    // ── REGISTER：Sender require joining ──
+    if (msg_type == MSG_REGISTER && len == sizeof(register_packet_t)) {
+        const register_packet_t *reg = (const register_packet_t *)data;
+
+        add_peer(reg->sender_mac);
+        node_state_t *node = register_node(reg->sender_mac);
+        if (!node) return;
+
+        welcome_packet_t welcome = {
+            .msg_type    = MSG_WELCOME,
+            .assigned_id = node->ecu_id,
+        };
+        esp_now_send(reg->sender_mac, (uint8_t *)&welcome, sizeof(welcome));
+        ESP_LOGI(TAG, "Sent WELCOME to ECU%d", node->ecu_id);
+        return;
+    }
+
+    // ── DATA：ADC frame ──
+    if (msg_type == MSG_DATA && len == sizeof(adc_packet_t)) {
+        const adc_packet_t *pkt = (const adc_packet_t *)data;
+        uint32_t rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
+
+        node_state_t *node = find_node_by_mac(info->src_addr);
+        if (!node) {
+            ESP_LOGW(TAG, "Data from unknown node, ignoring");
+            return;
+        }
+
+        node->last_seen_us = esp_timer_get_time();
+        node->status       = NODE_STREAMING;
+
+        // update confirmed_floor
+        for (int i = 0; i < pkt->frame_count; i++) {
+            if (pkt->frames[i].counter > node->confirmed_floor)
+                node->confirmed_floor = pkt->frames[i].counter;
+        }
+
+        ESP_LOGI(TAG, "ECU%d | %d frame(s) | floor=%d",
+                 pkt->sender_id, pkt->frame_count, node->confirmed_floor);
+
+        // UART output JSON
+        uart_send_json(pkt, rx_time_ms);
+
+        // send ACK
+        ack_packet_t ack = {
+            .msg_type        = MSG_ACK,
+            .ack_to          = node->ecu_id,
+            .confirmed_floor = node->confirmed_floor,
+        };
+        esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
+        return;
+    }
+
+    ESP_LOGW(TAG, "Unknown msg_type=0x%02X len=%d", msg_type, len);
+}
+
+/*---------------------------------------------------------------
+    HELLO Broadcast Task
+---------------------------------------------------------------*/
+
+static void hello_task(void *arg) {
+    uint8_t broadcast_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+    // 注册广播peer
+    esp_now_peer_info_t bp = {};
+    memcpy(bp.peer_addr, broadcast_mac, 6);
+    bp.channel = 0;
+    bp.encrypt = false;
+    esp_now_add_peer(&bp);
+
+    hello_packet_t hello = {.msg_type = MSG_HELLO};
+    memcpy(hello.controller_mac, my_mac, 6);
+
+    while (1) {
+        esp_now_send(broadcast_mac, (uint8_t *)&hello, sizeof(hello));
+        ESP_LOGD(TAG, "HELLO broadcast");
+        vTaskDelay(pdMS_TO_TICKS(HELLO_INTERVAL_MS));
     }
 }
 
-// Wifi station
+/*---------------------------------------------------------------
+    Disconnect detection Task
+---------------------------------------------------------------*/
+
+static void watchdog_task(void *arg) {
+    while (1) {
+        int64_t now = esp_timer_get_time();
+        for (int i = 0; i < registry_count; i++) {
+            node_state_t *node = &registry[i];
+            if (node->status == NODE_STREAMING &&
+                now - node->last_seen_us > DISCONNECT_TIMEOUT_US) {
+                node->status = NODE_DISCONNECTED;
+                ESP_LOGW(TAG, "ECU%d DISCONNECTED (5min timeout)", node->ecu_id);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+/*---------------------------------------------------------------
+    WiFi init
+---------------------------------------------------------------*/
+
 static void wifi_init(void) {
-    wifi_event_group = xEventGroupCreate();
-
     nvs_flash_init();
     esp_netif_init();
     esp_event_loop_create_default();
-    esp_netif_create_default_wifi_sta();
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&cfg);
-
-    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL);
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid     = WIFI_SSID,
-            .password = WIFI_PASS,
-        },
-    };
     esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     esp_wifi_start();
-    esp_wifi_connect();
-
-    ESP_LOGI(TAG, "Connecting to WiFi...");
-
-    // Wait for successful connection or timeout
-    EventBits_t bits = xEventGroupWaitBits(wifi_event_group,
-                                           WIFI_CONNECTED_BIT,
-                                           pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(15000));
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "WiFi connected!");
-    } else {
-        ESP_LOGE(TAG, "WiFi FAILED to connect. Check SSID/password.");
-    }
-
-    uint8_t mac[6];
-    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    esp_wifi_get_mac(WIFI_IF_STA, my_mac);
     ESP_LOGI(TAG, "My MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+             my_mac[0], my_mac[1], my_mac[2],
+             my_mac[3], my_mac[4], my_mac[5]);
 }
 
-static void sntp_init_time(void) {
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    esp_netif_sntp_init(&config);
-    esp_netif_sntp_start();   
-    6
-    time_t now = 0;
-    struct tm timeinfo = {};
-    int retry = 0;
-    while (timeinfo.tm_year < (2020 - 1900) && retry++ < 15) {
-        ESP_LOGI(TAG, "Waiting for NTP sync... (%d/15)", retry);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-        time(&now);
-        localtime_r(&now, &timeinfo);
-    }
-
-    if (timeinfo.tm_year >= (2020 - 1900)) {
-        ESP_LOGI(TAG, "Time synced: %04d-%02d-%02d %02d:%02d:%02d UTC",
-                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
-                 timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-    } else {
-        ESP_LOGW(TAG, "NTP sync FAILED");
-    }
-}
-
-// recieve callback
-static void on_data_recv(const esp_now_recv_info_t *info,
-                         const uint8_t *data, int len) {
-    if (len != sizeof(adc_frame_t)) {
-        printf("[RX] Unknown packet size: %d\n", len);
-        return;
-    }
-
-    const adc_frame_t *frame = (const adc_frame_t *)data;
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm *t = gmtime(&tv.tv_sec);
-
-    printf("{\n");
-    printf("  \"ecu_serial\": %d,\n", frame->sender_id);
-    printf("  \"timestep\": \"%04d-%02d-%02dT%02d:%02d:%02d.%03ldZ\",\n",
-           t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
-           t->tm_hour, t->tm_min, t->tm_sec,
-           tv.tv_usec / 1000);
-    printf("  \"voltage_samples\": [");
-    for (int i = 0; i < SAMPLES_PER_FRAME; i++) {
-        printf("%d%s", frame->voltage_mv[i], i < SAMPLES_PER_FRAME - 1 ? "," : "");
-    }
-    printf("],\n");
-    printf("  \"current_samples\": [");
-    for (int i = 0; i < SAMPLES_PER_FRAME; i++) {
-        printf("%d%s", frame->current_ma[i], i < SAMPLES_PER_FRAME - 1 ? "," : "");
-    }
-    printf("]\n}\n");
-
-    send_ack(info->src_addr, frame->sender_id, frame->counter);
-}
+/*---------------------------------------------------------------
+    App Main
+---------------------------------------------------------------*/
 
 void app_main(void) {
     wifi_init();
-    sntp_init_time();
+
+    // UARTinit
+    uart_config_t uart_cfg = {
+        .baud_rate = UART_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    };
+    uart_driver_install(UART_PORT, 1024, 0, 0, NULL, 0);
+    uart_param_config(UART_PORT, &uart_cfg);
 
     if (esp_now_init() != ESP_OK) {
-        printf("[ERROR] ESP-NOW init failed\n");
+        ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
-
     esp_now_register_recv_cb(on_data_recv);
 
-    add_peer(sender1_mac);
-    add_peer(sender2_mac);
+    xTaskCreate(hello_task,    "hello",    2048, NULL, 3, NULL);
+    xTaskCreate(watchdog_task, "watchdog", 2048, NULL, 2, NULL);
 
-    printf("[RECEIVER] Ready, waiting for data...\n");
-
-    // Broadcast to all senders they can send message
-    uint8_t ready_msg = 0xAA;
-    uint8_t broadcast_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-    esp_now_peer_info_t broadcast_peer = {};
-    memcpy(broadcast_peer.peer_addr, broadcast_mac, 6);
-    broadcast_peer.channel = 0;
-    broadcast_peer.encrypt = false;
-    esp_now_add_peer(&broadcast_peer);
-
-    // Broadcasting 3 times, with 500ms interval, avoid sender miss signal
-    for (int i = 0; i < 3; i++) {
-        esp_now_send(broadcast_mac, &ready_msg, sizeof(ready_msg));
-        ESP_LOGI(TAG, "Broadcasted READY signal (%d/3)", i + 1);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
+    ESP_LOGI(TAG, "Controller ready, broadcasting HELLO...");
 }
