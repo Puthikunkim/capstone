@@ -1,50 +1,49 @@
-const API_URL = "http://localhost:8000/api";
+const API_BASE = "http://localhost:8000/api";
 
-/**
- * Generic fetch wrapper with error handling
- * @param {string} endpoint - The API endpoint (e.g., '/ecu')
- * @param {object} options - Fetch options (method, headers, body, etc.)
- * @returns {Promise<any>} The parsed JSON response
- */
-async function fetchApi(endpoint, options = {}) {
-  const url = `${API_URL}${endpoint}`;
-  const response = await fetch(url, {
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
+async function request(endpoint, options = {}) {
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
   });
-
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+    throw new Error(`${response.status} ${response.statusText}`);
   }
-
   return response.json();
 }
 
-/**
- * Fetch all ECUs from the backend
- * @returns {Promise<Array>} List of ECUs
- */
-export async function fetchEcus() {
-  return fetchApi("/ecu");
-}
+// ── ECU ──────────────────────────────────────────────────────────────
+export const fetchEcus = () => request("/ecu");
 
-/**
- * Fetch a specific ECU by ID
- * @param {number} ecuId - The ECU ID
- * @returns {Promise<object>} ECU details
- */
-export async function fetchEcu(ecuId) {
-  return fetchApi(`/ecu/${ecuId}`);
-}// HTTP utility is a wrapper around the browser Fetch API for REST calls.
+export const fetchEcu = (ecuId) => request(`/ecu/${ecuId}`);
 
-/**
- * Fetch a specific ECU's historical data
- * @param {number} ecuId - The ECU ID
- * @returns {Promise<object>} ECU's historical data
- */
-export async function fetchEcuHistory(ecuId) {
-   return fetchApi(`/ecu/${ecuId}/history`);
+export const fetchEcuHistory = (ecuId, limit = 100) =>
+  request(`/ecu/${ecuId}/history?limit=${limit}`);
+
+export const configureEcu = (ecuId, config) =>
+  request(`/ecu/${ecuId}/configure`, {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+
+// ── Violations / Alerts ───────────────────────────────────────────────
+export const fetchViolations = (ecuId, limit = 50) =>
+  request(`/violations?ecu_id=${ecuId}&limit=${limit}`);
+
+// ── Firmware ──────────────────────────────────────────────────────────
+export const fetchFirmwareStatus = (ecuId) =>
+  request(`/${ecuId}/firmware/status`);
+
+export async function uploadFirmware(ecuId, file) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE}/${ecuId}/firmware`, {
+    method: "POST",
+    body: form,
+    // No Content-Type header — browser sets it with the boundary automatically
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `${response.status} ${response.statusText}`);
+  }
+  return response.json();
 }
