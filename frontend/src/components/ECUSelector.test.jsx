@@ -1,3 +1,4 @@
+import { vi, describe, test, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ECUSelector } from './ECUSelector';
 

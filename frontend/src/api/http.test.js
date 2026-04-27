@@ -1,3 +1,4 @@
+import { vi, describe, test, expect, afterEach } from 'vitest';
 import { fetchEcus, fetchEcu, fetchEcuHistory } from './http';
 
 function mockOkResponse(data) {

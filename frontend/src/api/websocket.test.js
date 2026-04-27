@@ -1,3 +1,4 @@
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import WebSocketClient from './websocket';
 
 let mockWs;

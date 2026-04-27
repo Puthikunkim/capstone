@@ -1,3 +1,4 @@
+import { vi, describe, test, expect, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useWebSocket } from './useWebSocket';
 
