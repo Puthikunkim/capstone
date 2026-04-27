@@ -2,17 +2,23 @@ import { vi, describe, test, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { EnergyChart } from './EnergyChart';
 
+const MockResponsiveContainer = vi.hoisted(() => {
+  const Comp = ({ children }) => <div>{children}</div>;
+  Comp.propTypes = { children: () => null };
+  return Comp;
+});
+
 // Recharts relies on ResizeObserver and SVG layout APIs not available in jsdom.
 // Replace all chart primitives with lightweight stubs.
 vi.mock('recharts', () => ({
-  LineChart: ({ children }) => <div data-testid="line-chart">{children}</div>,
+  LineChart: () => <div data-testid="line-chart" />,
   Line: () => null,
   XAxis: () => null,
   YAxis: () => null,
   CartesianGrid: () => null,
   Tooltip: () => null,
   Legend: () => null,
-  ResponsiveContainer: ({ children }) => <div>{children}</div>,
+  ResponsiveContainer: MockResponsiveContainer,
 }));
 
 const SAMPLE_DATA = [
