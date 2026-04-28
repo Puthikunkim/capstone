@@ -66,7 +66,8 @@ typedef struct {
 
 typedef struct {
     uint16_t counter;
-    uint32_t time_since_boot_ms;
+    uint16_t frame;                      
+    char     timestamp[27]; 
     int16_t  current_mv[SAMPLES_PER_FRAME];
     int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
@@ -265,40 +266,46 @@ static void add_peer(const uint8_t *mac) {
     UART JSON output
 ---------------------------------------------------------------*/
 
-static void uart_send_json(const adc_packet_t *pkt, uint32_t rx_time_ms) {
-    char buf[600];
-    int pos = 0;
+// static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac) {
+//     char buf[800];
+//     int pos = 0;
 
-    pos += snprintf(buf + pos, sizeof(buf) - pos,
-                    "{\"ecu_id\":%d,\"rx_time_ms\":%lu,\"frames\":[",
-                    pkt->sender_id, (unsigned long)rx_time_ms);
+//     pos += snprintf(buf + pos, sizeof(buf) - pos,
+//                     "{\"type\":\"frame\",\"ecu_serial\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"frames\":[",
+//                     sender_mac[0], sender_mac[1], sender_mac[2],
+//                     sender_mac[3], sender_mac[4], sender_mac[5]);
 
-    for (int f = 0; f < pkt->frame_count; f++) {
-        const adc_frame_t *frame = &pkt->frames[f];
+//     for (int f = 0; f < pkt->frame_count; f++) {
+//         const adc_frame_t *frame = &pkt->frames[f];
 
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-                        "{\"counter\":%d,\"tx_time_ms\":%lu,\"voltage\":[",
-                        frame->counter,
-                        (unsigned long)frame->time_since_boot_ms);
+//         pos += snprintf(buf + pos, sizeof(buf) - pos,
+//                         "{\"tx_time_ms\":\"%s\",\"voltage\":[",
+//                         frame->timestamp);
 
-        for (int i = 0; i < SAMPLES_PER_FRAME; i++)
-            pos += snprintf(buf + pos, sizeof(buf) - pos,
-                            "%d%s", frame->voltage_mv[i],
-                            i < SAMPLES_PER_FRAME - 1 ? "," : "");
+//         for (int i = 0; i < SAMPLES_PER_FRAME; i++)
+//             pos += snprintf(buf + pos, sizeof(buf) - pos,
+//                             "%d%s", frame->voltage_mv[i],
+//                             i < SAMPLES_PER_FRAME - 1 ? "," : "");
 
-        pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"current\":[");
+//         pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"current\":[");
 
-        for (int i = 0; i < SAMPLES_PER_FRAME; i++)
-            pos += snprintf(buf + pos, sizeof(buf) - pos,
-                            "%d%s", frame->current_mv[i],
-                            i < SAMPLES_PER_FRAME - 1 ? "," : "");
+//         for (int i = 0; i < SAMPLES_PER_FRAME; i++)
+//             pos += snprintf(buf + pos, sizeof(buf) - pos,
+//                             "%d%s", frame->current_mv[i],
+//                             i < SAMPLES_PER_FRAME - 1 ? "," : "");
 
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
-                        "]}%s", f < pkt->frame_count - 1 ? "," : "");
-    }
+//         pos += snprintf(buf + pos, sizeof(buf) - pos,
+//                         "]}%s", f < pkt->frame_count - 1 ? "," : "");
+//     }
 
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "]}\n");
-    uart_write_bytes(UART_PORT, buf, pos);
+//     pos += snprintf(buf + pos, sizeof(buf) - pos, "]}\n");
+//     uart_write_bytes(UART_PORT, buf, pos);
+// }
+
+static void uart_send_raw(const adc_packet_t *pkt) {
+    uart_write_bytes(UART_PORT,
+                     (const char *)pkt,
+                     sizeof(adc_packet_t));
 }
 
 /*---------------------------------------------------------------
@@ -344,7 +351,6 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     // ── DATA: ADC frame ──
     if (msg_type == MSG_DATA && len == sizeof(adc_packet_t)) {
         const adc_packet_t *pkt = (const adc_packet_t *)data;
-        uint32_t rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
         node_state_t *node = find_node_by_mac(info->src_addr);
         if (!node) {
@@ -363,7 +369,8 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         ESP_LOGI(TAG, "ECU%d | %d frame(s) | floor=%d",
                  pkt->sender_id, pkt->frame_count, node->confirmed_floor);
 
-        uart_send_json(pkt, rx_time_ms);
+        // uart_send_json(pkt, info->src_addr);
+        uart_send_raw(pkt);
 
         ack_packet_t ack = {
             .msg_type        = MSG_ACK,

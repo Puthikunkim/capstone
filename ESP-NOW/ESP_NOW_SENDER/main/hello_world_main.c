@@ -64,7 +64,8 @@ typedef struct {
 
 typedef struct {
     uint16_t counter;
-    uint32_t time_since_boot_ms;
+    uint16_t frame;                      
+    char     timestamp[27]; // ISO UTC "2026-04-26T12:00:00.123456\0"
     int16_t  current_mv[SAMPLES_PER_FRAME];
     int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
@@ -153,9 +154,9 @@ static void compute_frame_timestamp(int64_t frame_boot_us,
 
     struct tm *final_tm = gmtime(&final_sec);
     snprintf(out, len,
-             "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
+             "%04d-%02d-%02dT%02d:%02d:%02d+00:00",
              final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
-             final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
+             final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec);
 }
 
 /*---------------------------------------------------------------
@@ -236,18 +237,11 @@ static uint8_t build_packet(adc_packet_t *pkt) {
         if (f->counter != c) continue;
 
         adc_frame_t *dst = &pkt->frames[pkt->frame_count++];
-
         dst->counter = f->counter;
+        dst->frame   = pkt->frame_count;
 
-        // ── [MODIFIED] time_since_boot_ms now uses real timestamp ──
-        // Original:
-        // dst->time_since_boot_ms = f->counter * 100;
-        //
-        // Changed: compute the actual boot-relative microsecond value
-        // from f->time_100ms so compute_frame_timestamp can derive
-        // the correct absolute wall-clock time on the backend.
-        dst->time_since_boot_ms = (uint32_t)f->time_100ms * 100;  // [MODIFIED]
-        // ─────────────────────────────────────────────────────────
+        int64_t frame_boot_us = (int64_t)f->time_100ms * 100000LL;
+        compute_frame_timestamp(frame_boot_us, dst->timestamp, sizeof(dst->timestamp));
 
         uint16_t tmp_current[SAMPLES_PER_FRAME];
         uint16_t tmp_voltage[SAMPLES_PER_FRAME];
@@ -492,19 +486,11 @@ void sender_task(void *arg) {
                 adc_packet_t pkt;
                 uint8_t count = build_packet(&pkt);
                 if (count > 0) {
-                    // ── [ADDED] log real timestamp of first frame ──
-                    if (time_synced) {
-                        char ts[32];
-                        int64_t frame_us =
-                            (int64_t)pkt.frames[0].time_since_boot_ms * 1000LL;
-                        compute_frame_timestamp(frame_us, ts, sizeof(ts));
-                        ESP_LOGI(TAG, "Sent %d frame(s), counter %d~%d, first ts: %s",
-                                 count,
-                                 pkt.frames[0].counter,
-                                 pkt.frames[count - 1].counter,
-                                 ts);
-                    }
-                    // ──────────────────────────────────────────────
+                    ESP_LOGI(TAG, "Sent %d frame(s), counter %d~%d, first ts: %s",
+                             count,
+                             pkt.frames[0].counter,
+                             pkt.frames[count - 1].counter,
+                             pkt.frames[0].timestamp);
                     esp_now_send(controller_mac,
                                  (uint8_t *)&pkt, sizeof(pkt));
                     waiting_ack    = true;
