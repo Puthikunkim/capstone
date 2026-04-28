@@ -3,15 +3,14 @@
 Reads binary adc_packet_t structs from serial port and dispatches to handlers.
 
 Packet layout (little-endian, all fields packed):
-  adc_packet_t  (216 bytes total)
+  adc_packet_t  (210 bytes total)
     msg_type     uint8
     sender_id    uint8
     frame_count  uint8
     frames       adc_frame_t[MAX_FRAMES]
 
-  adc_frame_t  (71 bytes each)
+  adc_frame_t  (69 bytes each)
     counter      uint16
-    frame        uint16
     timestamp    char[27]   (null-padded ISO string)
     current      int16[SAMPLES]
     voltage      int16[SAMPLES]
@@ -42,10 +41,10 @@ logger = logging.getLogger(__name__)
 
 SAMPLES = 10
 MAX_FRAMES = 3
-FRAME_SIZE = 2 + 2 + 27 + (2 * SAMPLES) + (2 * SAMPLES)   # 71 bytes
-PACKET_SIZE = 1 + 1 + 1 + FRAME_SIZE * MAX_FRAMES           # 216 bytes
+FRAME_SIZE = 2 + 27 + (2 * SAMPLES) + (2 * SAMPLES)        # 69 bytes
+PACKET_SIZE = 1 + 1 + 1 + FRAME_SIZE * MAX_FRAMES           # 210 bytes
 
-MSG_TYPE_ADC = 0x01
+MSG_TYPE_ADC = 0x04  # MSG_DATA in C
 
 
 # ---------------------------------------------------------------------------
@@ -64,19 +63,18 @@ def parse_packet(raw: bytes) -> dict | None:
     frames = []
     offset = 3
     for _ in range(min(frame_count, MAX_FRAMES)):
-        counter, frame_num = struct.unpack_from("<HH", raw, offset)
+        counter, = struct.unpack_from("<H", raw, offset)
         timestamp_str = (
-            raw[offset + 4 : offset + 31]
+            raw[offset + 2 : offset + 29]
             .decode("utf-8", errors="ignore")
             .rstrip("\x00")
         )
-        current = list(struct.unpack_from("<10h", raw, offset + 31))
-        voltage = list(struct.unpack_from("<10h", raw, offset + 51))
+        current = list(struct.unpack_from("<10h", raw, offset + 29))
+        voltage = list(struct.unpack_from("<10h", raw, offset + 49))
         offset += FRAME_SIZE
 
         frames.append({
             "counter":    counter,
-            "frame":      frame_num,
             "tx_time_ms": timestamp_str,
             "current":    current,
             "voltage":    voltage,
