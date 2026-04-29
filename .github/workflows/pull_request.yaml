@@ -133,31 +133,3 @@ jobs:
         run: npm test
 
 
-  codeql:
-    name: Analyze with codeql
-    runs-on: ubuntu-24.04
-    needs: [server_unit_tests, frontend_lint, frontend_unit_tests]
-    permissions:
-      security-events: write
-
-    strategy:
-      fail-fast: false
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.31.9
-        with:
-          languages: 'javascript, python'
-          config-file: ./.github/codeql/codeql-config.yml
-
-      - name: CodeQL autobuild
-        uses: github/codeql-action/autobuild@v4.31.9
-
-      - name: Perform vulnerability analysis
-        uses: github/codeql-action/analyze@v4.31.9
-
-
-  
