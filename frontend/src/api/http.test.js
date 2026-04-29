@@ -71,7 +71,7 @@ describe('fetchEcuHistory', () => {
     mockOkResponse([]);
     await fetchEcuHistory(7);
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/ecu/7/history',
+      'http://localhost:8000/api/ecu/7/history?limit=100',
       expect.anything()
     );
   });

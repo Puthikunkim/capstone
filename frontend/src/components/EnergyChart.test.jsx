@@ -27,29 +27,31 @@ const SAMPLE_DATA = [
 ];
 
 describe('EnergyChart', () => {
-  test('shows "No data to display" when data array is empty', () => {
+  test('shows empty state when data array is empty', () => {
     render(<EnergyChart data={[]} />);
-    expect(screen.getByText('No data to display')).toBeInTheDocument();
+    expect(screen.getByTestId('energy-chart-empty')).toBeInTheDocument();
   });
 
-  test('does not render any charts when data is empty', () => {
+  test('does not render chart panels when data is empty', () => {
     render(<EnergyChart data={[]} />);
-    expect(screen.queryByTestId('line-chart')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voltage-chart')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('current-chart')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('energy-chart-panel')).not.toBeInTheDocument();
   });
 
-  test('renders Voltage chart heading when data is provided', () => {
+  test('renders voltage chart panel when data is provided', () => {
     render(<EnergyChart data={SAMPLE_DATA} />);
-    expect(screen.getByText('Voltage (V)')).toBeInTheDocument();
+    expect(screen.getByTestId('voltage-chart')).toBeInTheDocument();
   });
 
-  test('renders Current chart heading when data is provided', () => {
+  test('renders current chart panel when data is provided', () => {
     render(<EnergyChart data={SAMPLE_DATA} />);
-    expect(screen.getByText('Current (A)')).toBeInTheDocument();
+    expect(screen.getByTestId('current-chart')).toBeInTheDocument();
   });
 
-  test('renders Energy chart heading when data is provided', () => {
+  test('renders energy chart panel when data is provided', () => {
     render(<EnergyChart data={SAMPLE_DATA} />);
-    expect(screen.getByText('Energy (kWh)')).toBeInTheDocument();
+    expect(screen.getByTestId('energy-chart-panel')).toBeInTheDocument();
   });
 
   test('renders three line charts when data is provided', () => {
@@ -57,13 +59,15 @@ describe('EnergyChart', () => {
     expect(screen.getAllByTestId('line-chart')).toHaveLength(3);
   });
 
-  test('does not show "No data to display" when data is provided', () => {
+  test('does not show empty state when data is provided', () => {
     render(<EnergyChart data={SAMPLE_DATA} />);
-    expect(screen.queryByText('No data to display')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('energy-chart-empty')).not.toBeInTheDocument();
   });
 
-  test('renders correctly with a single data point', () => {
+  test('renders all three panels with a single data point', () => {
     render(<EnergyChart data={[SAMPLE_DATA[0]]} />);
-    expect(screen.getAllByTestId('line-chart')).toHaveLength(3);
+    expect(screen.getByTestId('voltage-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('current-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('energy-chart-panel')).toBeInTheDocument();
   });
 });

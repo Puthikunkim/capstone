@@ -4,16 +4,17 @@ import PropTypes from 'prop-types';
 
 export function ECUSelector({ ecuList, selectedEcuId, onEcuChange }) {
   return (
-    <div className="ecu-selector">
-      <label htmlFor="ecu-select">Select ECU:</label>
+    <div className="ecu-selector" data-testid="ecu-selector">
+      <label htmlFor="ecu-select" data-testid="ecu-selector-label">Select ECU:</label>
       <select
         id="ecu-select"
+        data-testid="ecu-selector-dropdown"
         value={selectedEcuId || ""}
         onChange={(e) => onEcuChange(parseInt(e.target.value))}
       >
-        <option value="">-- Choose an ECU --</option>
+        <option value="" data-testid="ecu-selector-placeholder">-- Choose an ECU --</option>
         {ecuList.map((ecu) => (
-          <option key={ecu.id} value={ecu.id}>
+          <option key={ecu.id} value={ecu.id} data-testid={`ecu-option-${ecu.id}`}>
             {ecu.name || `ECU ${ecu.id}`} (Serial Number: {ecu.serial_number})
           </option>
         ))}

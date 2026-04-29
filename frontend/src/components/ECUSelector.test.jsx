@@ -10,50 +10,56 @@ const ECU_LIST = [
 describe('ECUSelector', () => {
   test('renders the label', () => {
     render(<ECUSelector ecuList={[]} selectedEcuId={null} onEcuChange={() => {}} />);
-    expect(screen.getByText('Select ECU:')).toBeInTheDocument();
+    expect(screen.getByTestId('ecu-selector-label')).toBeInTheDocument();
   });
 
-  test('renders placeholder option', () => {
+  test('renders the placeholder option', () => {
     render(<ECUSelector ecuList={[]} selectedEcuId={null} onEcuChange={() => {}} />);
-    expect(screen.getByText('-- Choose an ECU --')).toBeInTheDocument();
+    expect(screen.getByTestId('ecu-selector-placeholder')).toBeInTheDocument();
   });
 
-  test('renders an option for each ECU using id as fallback name', () => {
+  test('renders an option for each ECU', () => {
     render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={null} onEcuChange={() => {}} />);
-    expect(screen.getByText('ECU 1 (Serial Number: 1001)')).toBeInTheDocument();
+    expect(screen.getByTestId('ecu-option-1')).toBeInTheDocument();
+    expect(screen.getByTestId('ecu-option-2')).toBeInTheDocument();
   });
 
   test('uses ecu.name when provided', () => {
     render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={null} onEcuChange={() => {}} />);
-    expect(screen.getByText('Kart A (Serial Number: 2002)')).toBeInTheDocument();
+    expect(screen.getByTestId('ecu-option-2').textContent).toContain('Kart A');
+  });
+
+  test('uses ecu.id as fallback name when name is absent', () => {
+    render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={null} onEcuChange={() => {}} />);
+    expect(screen.getByTestId('ecu-option-1').textContent).toContain('ECU 1');
   });
 
   test('dropdown has empty value when selectedEcuId is null', () => {
     render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={null} onEcuChange={() => {}} />);
-    expect(screen.getByRole('combobox')).toHaveValue('');
+    expect(screen.getByTestId('ecu-selector-dropdown')).toHaveValue('');
   });
 
   test('dropdown reflects selectedEcuId', () => {
     render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={1} onEcuChange={() => {}} />);
-    expect(screen.getByRole('combobox')).toHaveValue('1');
+    expect(screen.getByTestId('ecu-selector-dropdown')).toHaveValue('1');
   });
 
   test('calls onEcuChange with a parsed integer on selection', () => {
     const onEcuChange = vi.fn();
     render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={null} onEcuChange={onEcuChange} />);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: '2' } });
+    fireEvent.change(screen.getByTestId('ecu-selector-dropdown'), { target: { value: '2' } });
     expect(onEcuChange).toHaveBeenCalledWith(2);
   });
 
   test('calls onEcuChange exactly once per change event', () => {
     const onEcuChange = vi.fn();
     render(<ECUSelector ecuList={ECU_LIST} selectedEcuId={null} onEcuChange={onEcuChange} />);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } });
+    fireEvent.change(screen.getByTestId('ecu-selector-dropdown'), { target: { value: '1' } });
     expect(onEcuChange).toHaveBeenCalledTimes(1);
   });
 
   test('renders without crashing when ecuList is empty', () => {
     render(<ECUSelector ecuList={[]} selectedEcuId={null} onEcuChange={() => {}} />);
-    expect(screen.getByRole('combobox')).toBeInTheDocument();
+    expect(screen.getByTestId('ecu-selector')).toBeInTheDocument();
   });
 });

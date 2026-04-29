@@ -7,7 +7,7 @@ import "./EnergyChart.css";
 
 export function EnergyChart({ data }) {
   if (!data || data.length === 0) {
-    return <div className="energy-chart"><p>No data to display</p></div>;
+    return <div className="energy-chart" data-testid="energy-chart"><p data-testid="energy-chart-empty">No data to display</p></div>;
   }
 
   // Format timestamp for X-axis display (HH:MM:SS)
@@ -30,10 +30,10 @@ export function EnergyChart({ data }) {
   const chartWidth = Math.max(chartData.length * 20, 600);
 
   return (
-    <div className="energy-chart">
+    <div className="energy-chart" data-testid="energy-chart">
         <div className="chart-scroll">
       {/* Voltage Chart */}
-      <div className="chart-container">
+      <div className="chart-container" data-testid="voltage-chart">
         <h3>Voltage (V)</h3>
         <ResponsiveContainer width={chartWidth} height={250}>
           <LineChart data={chartData}>
@@ -72,7 +72,7 @@ export function EnergyChart({ data }) {
       </div>
 
       {/* Current Chart */}
-      <div className="chart-container">
+      <div className="chart-container" data-testid="current-chart">
         <h3>Current (A)</h3>
         <ResponsiveContainer width={chartWidth} height={250}>
           <LineChart data={chartData}>
@@ -111,7 +111,7 @@ export function EnergyChart({ data }) {
       </div>
 
       {/* Energy Chart */}
-      <div className="chart-container">
+      <div className="chart-container" data-testid="energy-chart-panel">
         <h3>Energy (kWh)</h3>
         <ResponsiveContainer width={chartWidth} height={250}>
           <LineChart data={chartData}>
