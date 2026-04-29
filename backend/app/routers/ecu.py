@@ -16,7 +16,7 @@ from app.schemas.energy_frame import EnergyFrameResponse
 from app.services.broadcast import manager
 from app.services.storage import configure_ecu, get_ecu, get_frames, list_ecus
 
-router = APIRouter(prefix = '/ecu', tags=["ecu"])
+router = APIRouter(prefix='/ecu', tags=["ecu"])
 
 
 @router.get("/", response_model=list[ECUResponse])

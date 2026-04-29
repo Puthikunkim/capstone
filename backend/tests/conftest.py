@@ -39,12 +39,12 @@ def db(engine):
 def client(db):
     from main import create_app
 
-    app = create_app()
+    fastapi_app = create_app()
 
     def override_get_db():
         yield db
 
-    app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_db] = override_get_db
 
     with (
         patch.object(manager, "notify", new_callable=AsyncMock),
@@ -52,5 +52,5 @@ def client(db):
         patch.object(manager, "notify_alert", new_callable=AsyncMock),
         patch("main.init_db"),
     ):
-        with TestClient(app) as c:
+        with TestClient(fastapi_app) as c:
             yield c
