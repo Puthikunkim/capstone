@@ -91,11 +91,11 @@ def track_power_violation(
 			return ViolationUpdate(event=event, transition="started", over_limit=True)
 
 		open_event.frame_count += 1
-		if frame_timestamp > open_event.last_over_timestamp:
+		if frame_timestamp > _to_utc(open_event.last_over_timestamp):
 			open_event.last_over_timestamp = frame_timestamp
 		open_event.peak_power_watts = max(float(open_event.peak_power_watts), power_watts)
 		open_event.limit_watts = limit_watts
-		open_event.duration_seconds = _duration_seconds(open_event.start_timestamp, open_event.last_over_timestamp)
+		open_event.duration_seconds = _duration_seconds(_to_utc(open_event.start_timestamp), _to_utc(open_event.last_over_timestamp))
 		open_event.penalty_seconds = _calculate_penalty_seconds(open_event.duration_seconds)
 		open_event.is_warning = open_event.penalty_seconds == 0.0
 		db.commit()
@@ -105,12 +105,12 @@ def track_power_violation(
 	if open_event is None:
 		return ViolationUpdate(event=None, transition="none", over_limit=False)
 
-	if frame_timestamp < open_event.last_over_timestamp:
+	if frame_timestamp < _to_utc(open_event.last_over_timestamp):
 		# Ignore out-of-order non-breach frames so they don't close active events early.
 		return ViolationUpdate(event=open_event, transition="none", over_limit=False)
 
 	open_event.end_timestamp = open_event.last_over_timestamp
-	open_event.duration_seconds = _duration_seconds(open_event.start_timestamp, open_event.last_over_timestamp)
+	open_event.duration_seconds = _duration_seconds(_to_utc(open_event.start_timestamp), _to_utc(open_event.last_over_timestamp))
 	open_event.penalty_seconds = _calculate_penalty_seconds(open_event.duration_seconds)
 	open_event.is_warning = open_event.penalty_seconds == 0.0
 	db.commit()
