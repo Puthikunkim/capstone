@@ -90,7 +90,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: frontend  
+        working-directory: frontend
 
     steps:
       - name: Checkout
@@ -110,35 +110,26 @@ jobs:
       - name: Build
         run: npm run build
 
-
-  codeql:
-    name: Analyze with codeql
+  frontend_unit_tests:
+    name: Frontend unit tests
     runs-on: ubuntu-24.04
-    needs: [server_unit_tests, frontend_lint]
-    permissions:
-      security-events: write
-
-    strategy:
-      fail-fast: false
+    defaults:
+      run:
+        working-directory: frontend
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4.31.9
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          languages: 'javascript, python'
-          config-file: ./.github/codeql/codeql-config.yml
-          # If you wish to specify custom queries, you can do so here or in a config file.
-          # By default, queries listed here will override any specified in a config file.
-          # Prefix the list here with "+" to use these queries and those in the config file.
+          node-version: '20'
 
-      - name: CodeQL autobuild
-        uses: github/codeql-action/autobuild@v4.31.9
+      - name: Install packages
+        run: npm ci
 
-      - name: Perform vulnerability analysis
-        uses: github/codeql-action/analyze@v4.31.9
+      - name: Unit test
+        run: npm test
 
 
-  

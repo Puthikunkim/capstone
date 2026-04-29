@@ -277,7 +277,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
   if (backendError) {
     return (
       <div className="dashboard">
-        <div className="error-card">
+        <div className="error-card" data-testid="backend-error">
           <div className="error-card-box">
             <svg className="error-icon" viewBox="0 0 40 40" fill="none">
               <circle cx="20" cy="20" r="18" stroke="currentColor" strokeWidth="2" />
@@ -299,7 +299,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
   if (!selectedEcuId) {
     return (
       <div className="dashboard">
-        <div className="dashboard-empty">
+        <div className="dashboard-empty" data-testid="dashboard-empty">
           <svg className="empty-icon" viewBox="0 0 48 48" fill="none">
             <rect x="6" y="10" width="36" height="28" rx="4" stroke="currentColor" strokeWidth="2" />
             <path d="M16 24h16M24 16v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -338,7 +338,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
               </svg>
               Class: {classLabel}
             </span>
-            <span className={`meta-item status-live ${isConnected ? "active" : ""}`}>
+            <span className={`meta-item status-live ${isConnected ? "active" : ""}`} data-testid="connection-status">
               <svg viewBox="0 0 16 16" fill="none" className="meta-icon">
                 <path d="M2 8c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M4.5 8c0-1.933 1.567-3.5 3.5-3.5S11.5 6.067 11.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
@@ -447,7 +447,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
           <span className="chart-window-badge">Live</span>
         </div>
         {!isConnected && chartData.length === 0 ? (
-          <div className="chart-empty">
+          <div className="chart-empty" data-testid="chart-empty">
             <p>Waiting for data stream</p>
             <span>Chart will populate once the ECU starts sending frames</span>
           </div>
@@ -624,7 +624,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
 
           <div className="alerts-list">
             {violations.length === 0 ? (
-              <div className="alerts-empty">
+              <div className="alerts-empty" data-testid="alerts-empty">
                 <p>No alerts recorded</p>
                 <span>Power violations will appear here</span>
               </div>

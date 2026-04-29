@@ -203,3 +203,12 @@ Examples:
 
 - `feat: add POST /data endpoint`
 - `fix: handle WebSocket disconnect without crashing`
+
+## Contributors
+
+| Name | GitHub |
+| ---- | ------ |
+| Jerry Kim | [@Puthikunkim](https://github.com/Puthikunkim) |
+| Shihoo Park | [@shewho1119](https://github.com/shewho1119) |
+| Ajith Penmatsa | [@Ajith05105](https://github.com/Ajith05105) |
+| Oshan Premkumar | [@OshanNZ](https://github.com/OshanNZ) / [@OshanpNZ](https://github.com/OshanpNZ) |
