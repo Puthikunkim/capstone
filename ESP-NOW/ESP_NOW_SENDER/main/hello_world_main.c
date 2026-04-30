@@ -130,6 +130,24 @@ static adc_cali_handle_t adc1_cali_voltage = NULL;
 static adc_channel_t channels[2] = {ADC_CURRENT_CHANNEL, ADC_VOLTAGE_CHANNEL};
 
 void sender_task(void *arg);
+void adc_task(void *arg);
+
+// ADC-Sender ring
+
+#define SAMPLE_RING_SIZE 500
+#define SAMPLE_PERIOD_MS 10
+
+typedef struct {
+    int16_t current_mv;
+    int16_t voltage_mv;
+    int64_t sampled_at;
+} raw_sample_t;
+
+static raw_sample_t sample_ring[SAMPLE_RING_SIZE];
+static volatile uint16_t ring_write = 0;
+static volatile uint16_t ring_read  = 0;
+static SemaphoreHandle_t ring_mutex;
+
 
 /*---------------------------------------------------------------
     [ADDED] Compute real ISO timestamp for a given frame.
@@ -268,7 +286,7 @@ static uint8_t build_packet(adc_packet_t *pkt) {
     ESP-NOW callbacks
 ---------------------------------------------------------------*/
 
-static void on_data_sent(const uint8_t *mac, esp_now_send_status_t status) {
+static void on_data_sent(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) { 
     if (status != ESP_NOW_SEND_SUCCESS) {
         waiting_ack = false;
         consecutive_timeouts++;
@@ -359,6 +377,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
         ESP_LOGI(TAG, "Registered! Assigned ID = %d, sync time = %s",
                  my_id, sync_timestamp); // [MODIFIED] log includes timestamp
+        xTaskCreate(adc_task,  "adc_task",  4096, NULL, 6, NULL);
         xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, NULL);
         return;
     }
@@ -437,19 +456,16 @@ static void wifi_init(void) {
     Sender Task (starts after receiving WELCOME)
 ---------------------------------------------------------------*/
 
-void sender_task(void *arg) {
-    int16_t current_buf[SAMPLES_PER_FRAME];
-    int16_t voltage_buf[SAMPLES_PER_FRAME];
-    int     sample_index     = 0;
+void adc_task (void *arg) {
     int64_t last_sample_time = 0;
 
-    ESP_LOGI(TAG, "Sender task started as ECU%d", my_id);
+    ESP_LOGI(TAG, "ADC task started as ECU%d", my_id);
 
-    while (1) {
+    while(1) {
         int64_t now = esp_timer_get_time() / 1000;
 
         // 100Hz sampling
-        if (now - last_sample_time >= 10) {
+        if (now - last_sample_time >= SAMPLE_PERIOD_MS) {
             last_sample_time = now;
             int raw_c, raw_v, mv_c, mv_v;
             ESP_ERROR_CHECK(adc_oneshot_read(
@@ -459,10 +475,43 @@ void sender_task(void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
-            current_buf[sample_index] = (int16_t)(mv_c * GAIN);
-            voltage_buf[sample_index] = (int16_t)mv_v;
-            sample_index++;
+            xSemaphoreTake(ring_mutex, portMAX_DELAY);
+            uint16_t slot = ring_write % SAMPLE_RING_SIZE;
+            sample_ring[slot].current_mv   = (int16_t)(mv_c * GAIN);
+            sample_ring[slot].voltage_mv   = (int16_t)mv_v;
+            sample_ring[slot].sampled_at = now;
+            ring_write++;
+            xSemaphoreGive(ring_mutex);
+
+            //current_buf[sample_index] = (int16_t)(mv_c * GAIN);
+            //voltage_buf[sample_index] = (int16_t)mv_v;
+            //sample_index++;
         }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+void sender_task(void *arg) {
+    int16_t current_buf[SAMPLES_PER_FRAME];
+    int16_t voltage_buf[SAMPLES_PER_FRAME];
+    int     sample_index = 0;
+    int64_t now = 0;
+
+
+    ESP_LOGI(TAG, "Sender task started as ECU%d", my_id);
+
+    while (1) {
+
+        xSemaphoreTake(ring_mutex, portMAX_DELAY);
+        while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
+            uint16_t slot = ring_read % SAMPLE_RING_SIZE;
+            current_buf[sample_index] = sample_ring[slot].current_mv;
+            voltage_buf[sample_index] = sample_ring[slot].voltage_mv;
+            now = sample_ring[slot].sampled_at;
+            sample_index++;
+            ring_read++;
+        }
+        xSemaphoreGive(ring_mutex);
 
         if (sample_index >= SAMPLES_PER_FRAME) {
             buffer_push(current_buf, voltage_buf);
@@ -490,6 +539,7 @@ void sender_task(void *arg) {
 
             if (!waiting_ack) {
                 adc_packet_t pkt;
+                memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
                 if (count > 0) {
                     // ── [ADDED] log real timestamp of first frame ──
@@ -588,6 +638,7 @@ void app_main(void) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
+    ring_mutex = xSemaphoreCreateMutex();
     esp_now_register_send_cb(on_data_sent);
     esp_now_register_recv_cb(on_data_recv);
 
