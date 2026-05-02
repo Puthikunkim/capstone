@@ -25,9 +25,40 @@ export const configureEcu = (ecuId, config) =>
     body: JSON.stringify(config),
   });
 
+// ── Competitions ──────────────────────────────────────────────────────
+export const fetchCompetitions = () => request("/competitions");
+export const fetchCompetition = (id) => request(`/competitions/${id}`);
+export const createCompetition = (name, eventTypes) =>
+  request("/competitions/", { method: "POST", body: JSON.stringify({ name, event_types: eventTypes }) });
+export const fetchCompetitionTeams = (competitionId) =>
+  request(`/competitions/${competitionId}/teams`);
+
+// ── Teams ─────────────────────────────────────────────────────────────
+export const fetchTeams = () => request("/teams");
+export const createTeam = (payload) =>
+  request("/teams/", { method: "POST", body: JSON.stringify(payload) });
+export const fetchTeam = (teamId) => request(`/teams/${teamId}`);
+export const fetchTeamEcus = (teamId) => request(`/teams/${teamId}/ecus`);
+export const fetchAvailableEcus = () => request("/teams/available-ecus");
+export const assignEcuToTeam = (teamId, ecuId) =>
+  request(`/teams/${teamId}/assign/${ecuId}`, { method: "POST" });
+export const unassignEcuFromTeam = (teamId, ecuId) =>
+  request(`/teams/${teamId}/unassign/${ecuId}`, { method: "POST" });
+
 // ── Violations / Alerts ───────────────────────────────────────────────
 export const fetchViolations = (ecuId, limit = 50) =>
   request(`/violations?ecu_id=${ecuId}&limit=${limit}`);
+
+export const fetchOpenViolations = () =>
+  request("/violations/?open_only=true&limit=100");
+
+export const fetchAlerts = ({ ecuId, start, limit = 50 } = {}) => {
+  const p = new URLSearchParams();
+  if (ecuId) p.set("ecu_id", ecuId);
+  if (start) p.set("start", start);
+  p.set("limit", limit);
+  return request(`/alerts/?${p.toString()}`);
+};
 
 // ── Firmware ──────────────────────────────────────────────────────────
 export const fetchFirmwareStatus = (ecuId) =>

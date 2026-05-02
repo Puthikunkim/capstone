@@ -80,17 +80,24 @@ class TestConfigureEcu:
         assert resp.status_code == 200
         assert resp.json()["team_number"] == 42
 
-    def test_updates_power_limit(self, client, db):
-        ecu = make_ecu(db)
+    def test_power_limit_cannot_be_changed_via_configure(self, client, db):
+        ecu = make_ecu(db, power_limit_watts=350.0)
         resp = client.post(f"/api/ecu/{ecu.id}/configure", json={"power_limit_watts": 2000.0})
         assert resp.status_code == 200
-        assert resp.json()["power_limit_watts"] == 2000.0
+        assert resp.json()["power_limit_watts"] == 350.0
 
     def test_updates_vehicle_class(self, client, db):
         ecu = make_ecu(db)
         resp = client.post(f"/api/ecu/{ecu.id}/configure", json={"vehicle_class": "Open"})
         assert resp.status_code == 200
         assert resp.json()["vehicle_class"] == "Open"
+        assert resp.json()["power_limit_watts"] == 2000.0
+
+    def test_changing_to_standard_class_sets_350w_limit(self, client, db):
+        ecu = make_ecu(db, power_limit_watts=2000.0)
+        resp = client.post(f"/api/ecu/{ecu.id}/configure", json={"vehicle_class": "Standard"})
+        assert resp.status_code == 200
+        assert resp.json()["power_limit_watts"] == 350.0
 
     def test_returns_404_when_not_found(self, client):
         resp = client.post("/api/ecu/9999/configure", json={"team_number": 1})

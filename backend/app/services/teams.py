@@ -25,6 +25,7 @@ def create_team(db: Session, payload: TeamCreate) -> Team:
 
     team = Team(
         name=normalized_name,
+        competition_id=payload.competition_id,
         vehicle_class=payload.vehicle_class,
         vehicle_type=payload.vehicle_type,
     )
@@ -49,6 +50,11 @@ def list_team_ecus(db: Session, team_id: int) -> list[ECU]:
         .where(ECU.team_id == team_id)
         .order_by(ECU.last_seen.desc().nullslast(), ECU.serial_number.asc())
     )
+    return list(db.scalars(stmt).all())
+
+
+def list_teams_by_competition(db: Session, competition_id: int) -> list[Team]:
+    stmt = select(Team).where(Team.competition_id == competition_id).order_by(Team.name.asc(), Team.id.asc())
     return list(db.scalars(stmt).all())
 
 

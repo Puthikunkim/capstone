@@ -106,7 +106,7 @@ function useSessionTimer(active) {
 
 // ── Dashboard ────────────────────────────────────────────────────────
 
-export function Dashboard({ selectedEcuId, backendError }) {
+export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam, onUnassign }) {
   const [ecuData, setEcuData] = useState(null);
   const [chartData, setChartData] = useState([]);
   const [violations, setViolations] = useState([]);
@@ -117,7 +117,6 @@ export function Dashboard({ selectedEcuId, backendError }) {
     team_number: "",
     vehicle_class: "",
     vehicle_type: "",
-    power_limit_watts: "",
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState(null);
@@ -160,7 +159,6 @@ export function Dashboard({ selectedEcuId, backendError }) {
           team_number: ecu.team_number ?? "",
           vehicle_class: ecu.vehicle_class ?? "",
           vehicle_type: ecu.vehicle_type ?? "",
-          power_limit_watts: ecu.power_limit_watts ?? "",
         });
       })
       .catch(() => setEcuData(null));
@@ -223,7 +221,6 @@ export function Dashboard({ selectedEcuId, backendError }) {
         if (configForm.vehicle_class) payload.vehicle_class = configForm.vehicle_class;
         if (configForm.vehicle_type)  payload.vehicle_type  = configForm.vehicle_type;
         if (configForm.team_number !== "") payload.team_number = Number(configForm.team_number);
-        if (configForm.power_limit_watts !== "") payload.power_limit_watts = Number(configForm.power_limit_watts);
         const updated = await configureEcu(selectedEcuId, payload);
         setEcuData(updated);
         setConfigSuccess(true);
@@ -304,16 +301,18 @@ export function Dashboard({ selectedEcuId, backendError }) {
             <rect x="6" y="10" width="36" height="28" rx="4" stroke="currentColor" strokeWidth="2" />
             <path d="M16 24h16M24 16v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
-          <p>Select an ECU from the sidebar</p>
-          <span>Live telemetry will appear here once connected</span>
+          <p>There are no teams currently associated with this competition</p>
+          {onCreateTeam && (
+            <button className="btn-primary" onClick={onCreateTeam}>
+              + Add Team
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
-  const teamLabel = ecuData
-    ? `Team ${ecuData.team_number}`
-    : `ECU ${selectedEcuId}`;
+  const teamLabel = teamName ?? (ecuData ? `Team ${ecuData.team_number}` : `ECU ${selectedEcuId}`);
 
   const classLabel = ecuData?.vehicle_class ?? "--";
 
@@ -332,27 +331,28 @@ export function Dashboard({ selectedEcuId, backendError }) {
           <h1>{teamLabel} Monitor</h1>
           <div className="dashboard-meta">
             <span className="meta-item">
-              <svg viewBox="0 0 16 16" fill="none" className="meta-icon">
-                <rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.4" />
-                <path d="M5 8h6M8 5v6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
+                <path d="M1 10h14M3 10l1.5-4h7L13 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M1 10v2h2v-1M13 10v2h2v-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                <circle cx="4.5" cy="11.5" r="1" fill="currentColor" />
+                <circle cx="11.5" cy="11.5" r="1" fill="currentColor" />
               </svg>
-              Class: {classLabel}
+              {classLabel}
             </span>
             <span className={`meta-item status-live ${isConnected ? "active" : ""}`} data-testid="connection-status">
-              <svg viewBox="0 0 16 16" fill="none" className="meta-icon">
+              <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
                 <path d="M2 8c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M4.5 8c0-1.933 1.567-3.5 3.5-3.5S11.5 6.067 11.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <circle cx="8" cy="8" r="1.5" fill="currentColor" />
               </svg>
-              Status:{" "}
-              {isConnected ? "Live Data Stream" : "Disconnected"}
+              {isConnected ? "Live" : "Disconnected"}
             </span>
             <span className="meta-item">
-              <svg viewBox="0 0 16 16" fill="none" className="meta-icon">
+              <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
                 <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
                 <path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
               </svg>
-              Session Time: {sessionTime}
+              {sessionTime}
             </span>
           </div>
         </div>
@@ -410,14 +410,22 @@ export function Dashboard({ selectedEcuId, backendError }) {
         <StatCard
           icon={
             <svg viewBox="0 0 20 20" fill="none">
-              <path d="M10 3v1M10 16v1M3 10h1M16 10h1M5.05 5.05l.7.7M14.24 14.24l.71.71M5.05 14.95l.7-.7M14.24 5.76l.71-.71" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <circle cx="10" cy="10" r="4" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           }
-          label="Internal Temperature"
-          value={ecuData?.temperature?.toFixed(1)}
-          unit="°C"
-          sub={ecuData?.temperature == null ? "No sensor data" : null}
+          label="Power"
+          value={
+            lastFrame?.avg_voltage != null && lastFrame?.avg_current != null
+              ? (lastFrame.avg_voltage * lastFrame.avg_current).toFixed(1)
+              : null
+          }
+          unit="W"
+          sub={
+            lastFrame?.avg_voltage != null && lastFrame?.avg_current != null
+              ? (lastFrame.avg_voltage * lastFrame.avg_current) >= 0 ? "Discharging" : "Charging"
+              : "No data"
+          }
           subStyle="sub-muted"
         />
         <StatCard
@@ -440,20 +448,49 @@ export function Dashboard({ selectedEcuId, backendError }) {
         />
       </div>
 
-      {/* ── Real-time chart ── */}
-      <div className="chart-section">
-        <div className="chart-section-header">
-          <h3>Real-Time Energy Profiling</h3>
-          <span className="chart-window-badge">Live</span>
-        </div>
-        {!isConnected && chartData.length === 0 ? (
-          <div className="chart-empty" data-testid="chart-empty">
-            <p>Waiting for data stream</p>
-            <span>Chart will populate once the ECU starts sending frames</span>
+      {/* ── Real-time charts ── */}
+      <div className="chart-grid">
+        <div className="chart-section">
+          <div className="chart-section-header">
+            <h3>Voltage</h3>
+            <span className="chart-window-badge">Live</span>
           </div>
-        ) : (
-          <TelemetryChart data={chartData} />
-        )}
+          {!isConnected && chartData.length === 0 ? (
+            <div className="chart-empty" data-testid="chart-empty">
+              <p>Waiting for data stream</p>
+              <span>Start monitoring to see live data</span>
+            </div>
+          ) : (
+            <TelemetryChart
+              data={chartData}
+              dataKey="avg_voltage"
+              color="#00c6ff"
+              unit="V"
+              label="Voltage"
+            />
+          )}
+        </div>
+
+        <div className="chart-section">
+          <div className="chart-section-header">
+            <h3>Current</h3>
+            <span className="chart-window-badge">Live</span>
+          </div>
+          {!isConnected && chartData.length === 0 ? (
+            <div className="chart-empty">
+              <p>Waiting for data stream</p>
+              <span>Start monitoring to see live data</span>
+            </div>
+          ) : (
+            <TelemetryChart
+              data={chartData}
+              dataKey="avg_current"
+              color="#f59e0b"
+              unit="A"
+              label="Current"
+            />
+          )}
+        </div>
       </div>
 
       {/* ── Bottom grid: Config + Alerts ── */}
@@ -462,9 +499,14 @@ export function Dashboard({ selectedEcuId, backendError }) {
         <div className="config-card">
           <div className="card-header">
             <span className="card-title">ECU Configuration</span>
-            <span className="card-serial">
-              #{ecuData?.serial_number ?? "--"}
-            </span>
+            <div className="card-header-right">
+              <span className="card-serial">#{ecuData?.serial_number ?? "--"}</span>
+              {onUnassign && (
+                <button className="btn-unassign" onClick={onUnassign} title="Unassign ECU from team">
+                  Unassign ECU
+                </button>
+              )}
+            </div>
           </div>
 
           <form className="config-form" onSubmit={handleConfigSubmit}>
@@ -518,18 +560,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
                 />
               </div>
             </div>
-            <div className="form-field">
-              <label>Power Limit (W)</label>
-              <input
-                type="number"
-                name="power_limit_watts"
-                value={configForm.power_limit_watts}
-                onChange={handleConfigChange}
-                className="form-input"
-                min="0"
-                step="0.1"
-              />
-            </div>
+
 
             {configError && (
               <div className="form-feedback error">{configError}</div>
@@ -616,10 +647,10 @@ export function Dashboard({ selectedEcuId, backendError }) {
         {/* System Alerts */}
         <div className="alerts-card">
           <div className="card-header">
+            <span className="card-title">System Alerts</span>
             <svg viewBox="0 0 20 20" fill="none" width="16" height="16" className="alerts-icon">
               <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" fill="currentColor" />
             </svg>
-            <span className="card-title">System Alerts</span>
           </div>
 
           <div className="alerts-list">
@@ -658,4 +689,7 @@ export function Dashboard({ selectedEcuId, backendError }) {
 Dashboard.propTypes = {
   selectedEcuId: PropTypes.number,
   backendError: PropTypes.bool,
+  teamName: PropTypes.string,
+  onCreateTeam: PropTypes.func,
+  onUnassign: PropTypes.func,
 };

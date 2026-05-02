@@ -76,12 +76,10 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 
 	if "vehicle_class" in updates and updates["vehicle_class"] is not None:
 		ecu.vehicle_class = _coerce_vehicle_class(updates["vehicle_class"]) or ecu.vehicle_class
+		ecu.power_limit_watts = _default_power_limit(ecu.vehicle_class)
 
 	if "vehicle_type" in updates and updates["vehicle_type"] is not None:
 		ecu.vehicle_type = _coerce_vehicle_type(updates["vehicle_type"]) or ecu.vehicle_type
-
-	if "power_limit_watts" in updates and updates["power_limit_watts"] is not None:
-		ecu.power_limit_watts = float(updates["power_limit_watts"])
 
 	if "last_seen" in updates and updates["last_seen"] is not None:
 		incoming_last_seen = _to_utc(updates["last_seen"])

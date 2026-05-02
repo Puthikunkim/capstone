@@ -30,6 +30,7 @@ class Competition(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    teams = relationship("Team", back_populates="competition")
 
 
 class CompetitionEvent(Base):

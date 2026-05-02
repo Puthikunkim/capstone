@@ -63,6 +63,7 @@ def init_db() -> None:
 	Base.metadata.create_all(bind=engine)
 	_ensure_energy_frame_power_column()
 	_ensure_ecu_team_id_column()
+	_ensure_teams_competition_id_column()
 
 
 def _ensure_energy_frame_power_column() -> None:
@@ -93,3 +94,18 @@ def _ensure_ecu_team_id_column() -> None:
 	with engine.begin() as conn:
 		conn.execute(text("ALTER TABLE ecus ADD COLUMN team_id INTEGER"))
 		conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ecus_team_id ON ecus(team_id)"))
+
+
+def _ensure_teams_competition_id_column() -> None:
+	"""Ensure legacy databases have the teams competition_id column."""
+	inspector = inspect(engine)
+	if "teams" not in inspector.get_table_names():
+		return
+
+	column_names = {column["name"] for column in inspector.get_columns("teams")}
+	if "competition_id" in column_names:
+		return
+
+	with engine.begin() as conn:
+		conn.execute(text("ALTER TABLE teams ADD COLUMN competition_id INTEGER REFERENCES competitions(id) ON DELETE SET NULL"))
+		conn.execute(text("CREATE INDEX IF NOT EXISTS ix_teams_competition_id ON teams(competition_id)"))

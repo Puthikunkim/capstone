@@ -20,11 +20,12 @@ class TeamBase(BaseModel):
 
 
 class TeamCreate(TeamBase):
-    pass
+    competition_id: int | None = None
 
 
 class TeamResponse(TeamBase):
     id: int
+    competition_id: int | None = None
 
     model_config = {"from_attributes": True}
 

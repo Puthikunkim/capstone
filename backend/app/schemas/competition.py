@@ -18,7 +18,7 @@ class CompetitionBase(BaseModel):
 
 
 class CompetitionCreate(CompetitionBase):
-    pass
+    event_types: list[CompetitionEventType] = list(CompetitionEventType)
 
 
 class CompetitionEventResponse(BaseModel):

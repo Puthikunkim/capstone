@@ -1,17 +1,23 @@
 import PropTypes from "prop-types";
+import logo from "../assets/evolocity_logo.png";
 
-export function Navbar({ connectedCount, totalCount }) {
+export function Navbar({ connectedCount, totalCount, competition, onBack }) {
   const healthPct = totalCount > 0 ? Math.round((connectedCount / totalCount) * 100) : 100;
 
   return (
     <nav className="navbar">
       <div className="navbar-brand">
-        <div className="navbar-logo">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M10.5 2L4 10h5.5L7 16l7.5-8H9L10.5 2z" fill="white" />
-          </svg>
-        </div>
-        <span className="navbar-title">EVolocity</span>
+        {onBack && (
+          <button className="navbar-back-btn" onClick={onBack} title="Back to Competitions">
+            <svg viewBox="0 0 16 16" fill="none" width="14" height="14">
+              <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
+        <img src={logo} alt="EVolocity" className="navbar-logo-img" />
+        {competition && (
+          <span className="navbar-competition-name">{competition.name}</span>
+        )}
       </div>
 
       <div className="navbar-center">
@@ -50,6 +56,8 @@ export function Navbar({ connectedCount, totalCount }) {
 Navbar.propTypes = {
   connectedCount: PropTypes.number,
   totalCount: PropTypes.number,
+  competition: PropTypes.object,
+  onBack: PropTypes.func,
 };
 
 Navbar.defaultProps = {

@@ -106,7 +106,7 @@ describe('Dashboard — chart', () => {
     fetchEcuHistory.mockResolvedValue(history);
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() =>
-      expect(screen.getByTestId('telemetry-chart')).toBeInTheDocument()
+      expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2)
     );
   });
 });

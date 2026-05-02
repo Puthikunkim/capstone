@@ -28,7 +28,6 @@ class ECUConfigure(BaseModel):
     team_number: int | None = None
     vehicle_class: VehicleClass | None = None
     vehicle_type: VehicleType | None = None
-    power_limit_watts: float | None = None
     firmware_version: str | None = None
 
 

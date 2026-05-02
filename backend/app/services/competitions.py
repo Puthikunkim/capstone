@@ -31,7 +31,7 @@ def create_competition(db: Session, payload: CompetitionCreate) -> Competition:
     db.add(competition)
     db.flush()
 
-    for event_type in STANDARD_EVENT_TYPES:
+    for event_type in payload.event_types:
         db.add(
             CompetitionEvent(
                 competition_id=competition.id,
