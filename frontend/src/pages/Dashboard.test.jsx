@@ -1,5 +1,5 @@
 import { vi, describe, test, expect, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { Dashboard } from './Dashboard';
 
 vi.mock('../api/http', () => ({
@@ -17,12 +17,16 @@ vi.mock('../hooks/useWebSocket', () => ({
 
 vi.mock('../components/TelemetryChart', () => ({
   TelemetryChart: () => <div data-testid="telemetry-chart" />,
+  HistoryChart: () => <div data-testid="history-chart" />,
 }));
 
 import { fetchEcu, fetchEcuHistory, fetchViolations, fetchFirmwareStatus } from '../api/http';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 const ECU = { id: 1, serial_number: 1001, team_number: 1, vehicle_class: 'Standard', vehicle_type: 'kart' };
+const HISTORY = [
+  { timestamp: '2024-01-01T12:00:00Z', avg_voltage: 41.0, avg_current: -3.0, energy: -3.0 },
+];
 
 beforeEach(() => {
   useWebSocket.mockReturnValue({ isConnected: false, liveData: null });
@@ -61,7 +65,7 @@ describe('Dashboard — ECU selected', () => {
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() => {
       expect(fetchEcu).toHaveBeenCalledWith(1);
-      expect(fetchEcuHistory).toHaveBeenCalledWith(1);
+      expect(fetchEcuHistory).toHaveBeenCalledWith(1, 10000);
       expect(fetchViolations).toHaveBeenCalledWith(1);
     });
   });
@@ -100,10 +104,7 @@ describe('Dashboard — chart', () => {
   });
 
   test('shows TelemetryChart when history data is available', async () => {
-    const history = [
-      { timestamp: '2024-01-01T12:00:00Z', avg_voltage: 41.0, avg_current: -3.0, energy: -3.0 },
-    ];
-    fetchEcuHistory.mockResolvedValue(history);
+    fetchEcuHistory.mockResolvedValue(HISTORY);
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() =>
       expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2)
@@ -116,6 +117,90 @@ describe('Dashboard — alerts', () => {
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() =>
       expect(screen.getByTestId('alerts-empty')).toBeInTheDocument()
+    );
+  });
+});
+
+describe('Dashboard — Live/History toggle', () => {
+  test('renders Live and History toggle buttons for each chart', async () => {
+    render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getByTestId('connection-status')).toBeInTheDocument());
+    expect(screen.getAllByRole('button', { name: 'Live' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'History' })).toHaveLength(2);
+  });
+
+  test('Live buttons are active and History buttons are not by default', async () => {
+    render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getByTestId('connection-status')).toBeInTheDocument());
+    screen.getAllByRole('button', { name: 'Live' }).forEach(btn =>
+      expect(btn).toHaveClass('active')
+    );
+    screen.getAllByRole('button', { name: 'History' }).forEach(btn =>
+      expect(btn).not.toHaveClass('active')
+    );
+  });
+
+  test('clicking History on voltage chart shows HistoryChart and removes one TelemetryChart', async () => {
+    fetchEcuHistory.mockResolvedValue(HISTORY);
+    render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
+
+    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(1);
+    expect(screen.getByTestId('history-chart')).toBeInTheDocument();
+  });
+
+  test('clicking History on current chart shows HistoryChart and removes one TelemetryChart', async () => {
+    fetchEcuHistory.mockResolvedValue(HISTORY);
+    render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'History' })[1]);
+
+    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(1);
+    expect(screen.getByTestId('history-chart')).toBeInTheDocument();
+  });
+
+  test('History button gains active class and Live loses it after switching', async () => {
+    render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getByTestId('connection-status')).toBeInTheDocument());
+
+    const [liveBtn, historyBtn] = [
+      screen.getAllByRole('button', { name: 'Live' })[0],
+      screen.getAllByRole('button', { name: 'History' })[0],
+    ];
+
+    fireEvent.click(historyBtn);
+
+    expect(historyBtn).toHaveClass('active');
+    expect(liveBtn).not.toHaveClass('active');
+  });
+
+  test('clicking Live after History switches back to TelemetryChart', async () => {
+    fetchEcuHistory.mockResolvedValue(HISTORY);
+    render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
+    expect(screen.getByTestId('history-chart')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Live' })[0]);
+    expect(screen.queryByTestId('history-chart')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2);
+  });
+
+  test('toggles reset to Live when a different ECU is selected', async () => {
+    fetchEcuHistory.mockResolvedValue(HISTORY);
+    const { rerender } = render(<Dashboard selectedEcuId={1} />);
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
+    expect(screen.getByTestId('history-chart')).toBeInTheDocument();
+
+    rerender(<Dashboard selectedEcuId={2} />);
+    await waitFor(() =>
+      expect(screen.queryByTestId('history-chart')).not.toBeInTheDocument()
     );
   });
 });

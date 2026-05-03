@@ -300,6 +300,57 @@ body {
   padding: 3px 10px;
 }
 
+/* Live / History toggle */
+.chart-view-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.chart-view-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chart-view-btn:hover:not(.active) {
+  background: var(--gray-dim);
+  color: var(--text-primary);
+}
+
+.chart-view-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Scrollable history chart container */
+.history-chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.history-chart-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.history-chart-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.history-chart-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
 /* Telemetry chart */
 .telemetry-chart { display: flex; flex-direction: column; gap: 10px; }
 
