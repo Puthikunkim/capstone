@@ -104,7 +104,7 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 # This is used when processing incoming frames to ensure we have an ECU record to associate 
 # with the frame and any potential alerts.
 def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) -> ECU:
-	serial_number = int(frame_payload["ecu_serial"])
+	serial_number = str(frame_payload["ecu_serial"])
 	ecu = db.scalar(select(ECU).where(ECU.serial_number == serial_number))
 	if ecu is not None:
 		return ecu
@@ -159,7 +159,7 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 		avg_voltage=float(payload["avg_voltage"]),
 		avg_current=float(payload["avg_current"]),
 		power_watts=float(payload["avg_voltage"]) * float(payload["avg_current"]),
-		energy=float(payload["energy"]),
+		energy=0.0,
 	)
 	db.add(frame)
 	db.commit()

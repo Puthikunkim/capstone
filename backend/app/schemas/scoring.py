@@ -27,7 +27,7 @@ class ScoringStatus(str, Enum):
 class ScoringEntryResponse(BaseModel):
     rank: int | None
     ecu_id: int
-    serial_number: int
+    serial_number: str
     team_number: int
     status: ScoringStatus
     score: float
