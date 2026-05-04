@@ -28,6 +28,8 @@ import asyncio
 import json
 import logging
 import struct
+import queue
+import threading
 from datetime import datetime, timezone
 
 import serial
@@ -216,51 +218,60 @@ async def process_frames(queue: asyncio.Queue) -> None:
 # Serial reader (produces queue)
 # ---------------------------------------------------------------------------
 
-async def read_serial(port: str, baud: int, queue: asyncio.Queue) -> None:
+def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
+    """Runs entirely in a background thread. Puts parsed frames onto out."""
     logger.info("Opening %s at %d baud", port, baud)
-    loop = asyncio.get_running_loop()
     try:
-        ser = await loop.run_in_executor(None, lambda: serial.Serial(port, baud, timeout=1))
+        ser = serial.Serial(port, baud, timeout=1)
     except serial.SerialException as exc:
         logger.error("Failed to open port: %s", exc)
-        raise
+        out.put(None)  # sentinel to signal failure
+        return
 
-    if not await loop.run_in_executor(None, lambda: handle_time_sync(ser)):
+    if not handle_time_sync(ser):
         logger.warning("Time sync failed — ECU timestamps will be epoch")
 
     logger.info("Listening for packets (%d bytes each)…", PACKET_SIZE)
     try:
         while True:
-            raw = await loop.run_in_executor(None, lambda: sync_to_packet(ser))
+            raw = sync_to_packet(ser)
             packet = parse_packet(raw)
             if packet is None:
-                logger.warning("Invalid packet, skipping")
                 continue
-
             for frame in packet["frames"]:
                 frame["sender_id"] = packet["sender_id"]
-                await queue.put(frame)
-
-            logger.debug(
-                "Packet queued — ECU %d  frame_count=%d  queue_size=%d",
-                packet["sender_id"], packet["frame_count"], queue.qsize(),
-            )
-
-    except KeyboardInterrupt:
-        logger.info("Stopping")
+                out.put(frame)
+    except Exception as exc:
+        logger.error("Serial thread error: %s", exc)
     finally:
         ser.close()
+        out.put(None)  # sentinel
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 async def run(port: str, baud: int) -> None:
-    queue: asyncio.Queue = asyncio.Queue()
+    raw_queue: queue.Queue = queue.Queue()
+    async_queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    # Serial runs in a real OS thread — never touches the event loop
+    thread = threading.Thread(target=_serial_thread, args=(port, baud, raw_queue), daemon=True)
+    thread.start()
+
+    # Bridge: moves frames from thread-safe queue → asyncio queue
+    async def bridge() -> None:
+        while True:
+            try:
+                frame = await loop.run_in_executor(None, raw_queue.get)
+                if frame is None:  # sentinel — serial thread died
+                    logger.error("Serial thread exited, stopping")
+                    return
+                await async_queue.put(frame)
+            except Exception as exc:
+                logger.error("Bridge error: %s", exc)
+
     await asyncio.gather(
-        read_serial(port, baud, queue),
-        process_frames(queue),
+        bridge(),
+        process_frames(async_queue),
     )
 
 

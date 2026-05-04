@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
 from app.routers import competitions, alerts, ecu, firmware, scoring, teams, violations, websocket
-from serial_reader import process_frames, read_serial
+from serial_reader import run as serial_run
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +26,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database ready")
-
     if settings.SERIAL_PORT:
-        queue: asyncio.Queue = asyncio.Queue()
-        asyncio.create_task(read_serial(settings.SERIAL_PORT, settings.SERIAL_BAUD, queue))
-        asyncio.create_task(process_frames(queue))
+        asyncio.create_task(serial_run(settings.SERIAL_PORT, settings.SERIAL_BAUD))
         logger.info("Serial reader started on %s at %d baud", settings.SERIAL_PORT, settings.SERIAL_BAUD)
     else:
         logger.info("No SERIAL_PORT configured — serial reader disabled")
-
     yield
     logger.info("Shutting down")
 
