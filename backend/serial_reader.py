@@ -28,7 +28,6 @@ import asyncio
 import json
 import logging
 import struct
-import sys
 from datetime import datetime, timezone
 
 import serial
@@ -91,17 +90,31 @@ def handle_time_sync(ser: serial.Serial) -> bool:
 
 def sync_to_packet(ser: serial.Serial) -> bytes:
     buf = b''
+    garbage = b''
     while True:
         byte = ser.read(1)
         if not byte:
             continue
+        # Accumulate into rolling 4-byte window; bytes that fall out of the
+        # window before MAGIC is found are genuine garbage (not the MAGIC bytes themselves).
+        if len(buf) == 4:
+            garbage += buf[:1]
         buf = (buf + byte)[-4:]
         if buf == MAGIC:
-            return ser.read(PACKET_SIZE)
+            if garbage:
+                logger.warning(
+                    "sync: discarded %d garbage byte(s) before MAGIC — hex: %s",
+                    len(garbage), garbage.hex(),
+                )
+            raw = ser.read(PACKET_SIZE)
+            if len(raw) < PACKET_SIZE:
+                logger.warning("sync: short read — expected %d bytes got %d", PACKET_SIZE, len(raw))
+            return raw
 
 
 def parse_packet(raw: bytes) -> dict | None:
     if len(raw) < PACKET_SIZE:
+        logger.warning("parse: packet too short — %d bytes (expected %d), dropping", len(raw), PACKET_SIZE)
         return None
 
     msg_type    = raw[0]
@@ -109,6 +122,8 @@ def parse_packet(raw: bytes) -> dict | None:
     frame_count = raw[2]
 
     if frame_count < 1 or frame_count > MAX_FRAMES:
+        logger.warning("parse: invalid frame_count=%d (sender_id=%d msg_type=0x%02X) — dropping, likely out of sync",
+                       frame_count, sender_id, msg_type)
         return None
 
     frames = []
@@ -176,9 +191,10 @@ async def process_frames(queue: asyncio.Queue) -> None:
                 _, created = await persist_and_broadcast_frame(db, processed)
                 if created:
                     logger.info(
-                        "Frame saved — ECU %s  counter=%d  V=%.2f  A=%.3f",
+                        "Frame saved — ECU %s  counter=%d  esp_ts=%s  V=%.2f  A=%.3f",
                         ecu_serial,
                         frame["counter"],
+                        frame.get("tx_time_ms", "?"),
                         processed["avg_voltage"],
                         processed["avg_current"],
                     )
@@ -202,17 +218,17 @@ async def process_frames(queue: asyncio.Queue) -> None:
 
 async def read_serial(port: str, baud: int, queue: asyncio.Queue) -> None:
     logger.info("Opening %s at %d baud", port, baud)
+    loop = asyncio.get_running_loop()
     try:
-        ser = serial.Serial(port, baud, timeout=1)
+        ser = await loop.run_in_executor(None, lambda: serial.Serial(port, baud, timeout=1))
     except serial.SerialException as exc:
         logger.error("Failed to open port: %s", exc)
-        sys.exit(1)
+        raise
 
-    if not handle_time_sync(ser):
+    if not await loop.run_in_executor(None, lambda: handle_time_sync(ser)):
         logger.warning("Time sync failed — ECU timestamps will be epoch")
 
     logger.info("Listening for packets (%d bytes each)…", PACKET_SIZE)
-    loop = asyncio.get_event_loop()
     try:
         while True:
             raw = await loop.run_in_executor(None, lambda: sync_to_packet(ser))
@@ -248,7 +264,7 @@ async def run(port: str, baud: int) -> None:
     )
 
 
-def main() -> None:
+async def main() -> None:
     parser = argparse.ArgumentParser(description="EVolocity serial frame reader")
     parser.add_argument("--port", required=True, help="Serial port e.g. COM3")
     parser.add_argument("--baud", type=int, default=115200)
@@ -258,8 +274,8 @@ def main() -> None:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    asyncio.run(run(args.port, args.baud))
+    await run(args.port, args.baud)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
