@@ -44,13 +44,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 # ── UART framing — must match controller UART framing registry ───
-MAGIC       = b'\xFF\xFF\xFF\xFF'
-SAMPLES     = 10
-MAX_FRAMES  = 3
+MAGIC = b'\xFF\xFF\xFF\xFF'
+SAMPLES = 10
+MAX_FRAMES = 3
 
 # adc_frame_t: counter(H) frame(H) timestamp(27s) current(10h) voltage(10h)
-FRAME_FMT   = '<HH27s10h10h'
-FRAME_SIZE  = struct.calcsize(FRAME_FMT)   # 71 bytes
+FRAME_FMT = '<HH27s10h10h'
+FRAME_SIZE = struct.calcsize(FRAME_FMT)  # 71 bytes
 PACKET_SIZE = 3 + (FRAME_SIZE * MAX_FRAMES)  # 216 bytes
 
 MSG_TYPE_ADC = 0x04
@@ -76,7 +76,7 @@ def handle_time_sync(ser: serial.Serial) -> bool:
             line = b''
 
     now = datetime.now(timezone.utc)
-    ts  = now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond:06d}'
+    ts = now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond:06d}'
     response = json.dumps({"timestamp": ts}) + '\n'
     ser.write(response.encode('ascii'))
     ser.flush()
@@ -119,8 +119,8 @@ def parse_packet(raw: bytes) -> dict | None:
         logger.warning("parse: packet too short — %d bytes (expected %d), dropping", len(raw), PACKET_SIZE)
         return None
 
-    msg_type    = raw[0]
-    sender_id   = raw[1]
+    msg_type = raw[0]
+    sender_id = raw[1]
     frame_count = raw[2]
 
     if frame_count < 1 or frame_count > MAX_FRAMES:
