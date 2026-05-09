@@ -1,6 +1,12 @@
 import PropTypes from "prop-types";
 import logo from "../assets/evolocity_logo.png";
 
+const EVENT_LABELS = {
+  drag_race: "Drag Race",
+  gymkhana: "Gymkhana",
+  endurance_efficiency: "Endurance & Efficiency",
+};
+
 export function Navbar({ connectedCount, totalCount, competition, onBack }) {
   const healthPct = totalCount > 0 ? Math.round((connectedCount / totalCount) * 100) : 100;
 
@@ -16,7 +22,18 @@ export function Navbar({ connectedCount, totalCount, competition, onBack }) {
         )}
         <img src={logo} alt="EVolocity" className="navbar-logo-img" />
         {competition && (
-          <span className="navbar-competition-name">{competition.name}</span>
+          <>
+            <span className="navbar-competition-name">{competition.name}</span>
+            {competition.events?.length > 0 && (
+              <div className="navbar-event-badges">
+                {competition.events.map((ev) => (
+                  <span key={ev.id} className="navbar-event-badge">
+                    {EVENT_LABELS[ev.event_type] ?? ev.event_type}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -160,8 +160,8 @@ class TestListAvailableEcus:
         resp = client.get("/api/teams/available-ecus")
         assert resp.status_code == 200
         serials = [e["serial_number"] for e in resp.json()]
-        assert 1002 in serials
-        assert 1001 not in serials
+        assert "1002" in serials
+        assert "1001" not in serials
 
     def test_returns_empty_list_when_all_assigned(self, client, db):
         team = make_team(db)

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
-import { TelemetryChart } from "../components/TelemetryChart";
+import { TelemetryChart, HistoryChart } from "../components/TelemetryChart";
 import { useWebSocket } from "../hooks/useWebSocket";
 import {
   fetchEcu,
@@ -109,8 +109,11 @@ function useSessionTimer(active) {
 export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam, onUnassign }) {
   const [ecuData, setEcuData] = useState(null);
   const [chartData, setChartData] = useState([]);
+  const [historyData, setHistoryData] = useState([]);
   const [violations, setViolations] = useState([]);
   const [monitoring, setMonitoring] = useState(true);
+  const [voltageView, setVoltageView] = useState("live");
+  const [currentView, setCurrentView] = useState("live");
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -144,7 +147,10 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
     }
 
     setChartData([]);
+    setHistoryData([]);
     setViolations([]);
+    setVoltageView("live");
+    setCurrentView("live");
     setConfigError(null);
     setConfigSuccess(false);
     setFirmwareStatus(null);
@@ -163,10 +169,12 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
       })
       .catch(() => setEcuData(null));
 
-    fetchEcuHistory(selectedEcuId)
-      .then((history) =>
-        setChartData([...history].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)))
-      )
+    fetchEcuHistory(selectedEcuId, 10000)
+      .then((history) => {
+        const sorted = [...history].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        setHistoryData(sorted);
+        setChartData(sorted.slice(-100));
+      })
       .catch(() => {});
 
     fetchViolations(selectedEcuId)
@@ -197,6 +205,7 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
         const next = [...prev, liveData];
         return next.length > MAX_CHART_POINTS ? next.slice(-MAX_CHART_POINTS) : next;
       });
+      setHistoryData((prev) => [...prev, liveData]);
     }
   }, [liveData]);
 
@@ -453,16 +462,39 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
         <div className="chart-section">
           <div className="chart-section-header">
             <h3>Voltage</h3>
-            <span className="chart-window-badge">Live</span>
-          </div>
-          {!isConnected && chartData.length === 0 ? (
-            <div className="chart-empty" data-testid="chart-empty">
-              <p>Waiting for data stream</p>
-              <span>Start monitoring to see live data</span>
+            <div className="chart-view-toggle">
+              <button
+                className={`chart-view-btn ${voltageView === "live" ? "active" : ""}`}
+                onClick={() => setVoltageView("live")}
+              >
+                Live
+              </button>
+              <button
+                className={`chart-view-btn ${voltageView === "history" ? "active" : ""}`}
+                onClick={() => setVoltageView("history")}
+              >
+                History
+              </button>
             </div>
+          </div>
+          {voltageView === "live" ? (
+            !isConnected && chartData.length === 0 ? (
+              <div className="chart-empty" data-testid="chart-empty">
+                <p>Waiting for data stream</p>
+                <span>Start monitoring to see live data</span>
+              </div>
+            ) : (
+              <TelemetryChart
+                data={chartData}
+                dataKey="avg_voltage"
+                color="#00c6ff"
+                unit="V"
+                label="Voltage"
+              />
+            )
           ) : (
-            <TelemetryChart
-              data={chartData}
+            <HistoryChart
+              data={historyData}
               dataKey="avg_voltage"
               color="#00c6ff"
               unit="V"
@@ -474,16 +506,39 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
         <div className="chart-section">
           <div className="chart-section-header">
             <h3>Current</h3>
-            <span className="chart-window-badge">Live</span>
-          </div>
-          {!isConnected && chartData.length === 0 ? (
-            <div className="chart-empty">
-              <p>Waiting for data stream</p>
-              <span>Start monitoring to see live data</span>
+            <div className="chart-view-toggle">
+              <button
+                className={`chart-view-btn ${currentView === "live" ? "active" : ""}`}
+                onClick={() => setCurrentView("live")}
+              >
+                Live
+              </button>
+              <button
+                className={`chart-view-btn ${currentView === "history" ? "active" : ""}`}
+                onClick={() => setCurrentView("history")}
+              >
+                History
+              </button>
             </div>
+          </div>
+          {currentView === "live" ? (
+            !isConnected && chartData.length === 0 ? (
+              <div className="chart-empty">
+                <p>Waiting for data stream</p>
+                <span>Start monitoring to see live data</span>
+              </div>
+            ) : (
+              <TelemetryChart
+                data={chartData}
+                dataKey="avg_current"
+                color="#f59e0b"
+                unit="A"
+                label="Current"
+              />
+            )
           ) : (
-            <TelemetryChart
-              data={chartData}
+            <HistoryChart
+              data={historyData}
               dataKey="avg_current"
               color="#f59e0b"
               unit="A"

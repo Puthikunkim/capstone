@@ -300,6 +300,57 @@ body {
   padding: 3px 10px;
 }
 
+/* Live / History toggle */
+.chart-view-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.chart-view-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chart-view-btn:hover:not(.active) {
+  background: var(--gray-dim);
+  color: var(--text-primary);
+}
+
+.chart-view-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Scrollable history chart container */
+.history-chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.history-chart-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.history-chart-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.history-chart-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
 /* Telemetry chart */
 .telemetry-chart { display: flex; flex-direction: column; gap: 10px; }
 
@@ -558,6 +609,20 @@ body {
   color: var(--text-primary);
 }
 
+.navbar-event-badges {
+  display: flex; align-items: center; gap: 4px;
+  margin-left: 4px;
+}
+
+.navbar-event-badge {
+  font-size: 10px; font-weight: 600;
+  padding: 2px 7px; border-radius: 20px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* ── Competitions landing page ────────────────────────────────────── */
 .competitions-page {
   display: flex; flex-direction: column;
@@ -635,9 +700,103 @@ body {
 .competition-card-footer {
   border-top: 1px solid var(--border);
   padding-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .competition-card-enter {
   font-size: 13px; font-weight: 600; color: var(--accent);
+  cursor: pointer;
+}
+.competition-card-details-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px; font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.competition-card-details-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+
+/* ── Competition creation event list ─────────────────────────────── */
+.comp-creation-events {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px;
+}
+.comp-creation-event-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.comp-creation-event-item:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+.comp-creation-event-item.selected {
+  background: var(--accent-dim);
+  border-color: var(--accent-glow);
+  color: var(--text-primary);
+}
+.comp-creation-event-icon { color: var(--accent); display: flex; align-items: center; flex-shrink: 0; }
+.comp-creation-event-check { margin-left: auto; color: var(--accent); display: flex; align-items: center; flex-shrink: 0; }
+
+.comp-creation-badges {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 10px;
+}
+
+.form-field-hint {
+  font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.4;
+}
+
+/* ── Competition detail modal ─────────────────────────────────────── */
+.comp-detail-modal { max-width: 480px; }
+
+.comp-detail-events {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px;
+}
+.comp-detail-event-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-primary);
+}
+.comp-detail-event-icon { color: var(--accent); display: flex; align-items: center; flex-shrink: 0; }
+.comp-detail-event-name { font-weight: 600; }
+
+.comp-detail-count { font-weight: 400; color: var(--text-muted); }
+
+.comp-detail-team-list {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px;
+}
+.comp-detail-team-row {
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.comp-detail-team-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.comp-detail-team-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.comp-detail-no-teams {
+  font-size: 12px; color: var(--text-muted);
+  padding: 10px 0;
+  margin-top: 4px;
 }
 
 .competitions-empty {

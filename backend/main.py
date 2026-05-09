@@ -6,6 +6,7 @@ sets up the database on startup, and provides the uvicorn launch configuration.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -15,20 +16,22 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import init_db
-from app.routers import competitions, alerts, data, ecu, firmware, scoring, teams, violations, websocket
+from app.routers import competitions, alerts, ecu, firmware, scoring, teams, violations, websocket
+from serial_reader import run as serial_run
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifecycle manager: startup and shutdown hooks."""
-    # Startup
-    logger.info("Starting up: initializing database...")
     init_db()
     logger.info("Database ready")
+    if settings.SERIAL_PORT:
+        asyncio.create_task(serial_run(settings.SERIAL_PORT, settings.SERIAL_BAUD))
+        logger.info("Serial reader started on %s at %d baud", settings.SERIAL_PORT, settings.SERIAL_BAUD)
+    else:
+        logger.info("No SERIAL_PORT configured — serial reader disabled")
     yield
-    # Shutdown
     logger.info("Shutting down")
 
 
@@ -57,7 +60,6 @@ def create_app() -> FastAPI:
     logger.info("CORS configured for origins: %s", allowed_origins)
 
     # Register routers
-    app.include_router(data.router, prefix="/api")
     app.include_router(ecu.router, prefix="/api")
     app.include_router(alerts.router, prefix="/api")
     app.include_router(firmware.router, prefix="/api")

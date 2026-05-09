@@ -51,7 +51,7 @@ class TestListEcus:
     def test_response_contains_expected_fields(self, client, db):
         make_ecu(db, serial_number=9999)
         ecu = client.get("/api/ecu/").json()[0]
-        assert ecu["serial_number"] == 9999
+        assert ecu["serial_number"] == "9999"
         assert "id" in ecu
         assert "is_connected" in ecu
 
@@ -66,7 +66,7 @@ class TestGetEcu:
     def test_returns_correct_serial_number(self, client, db):
         ecu = make_ecu(db, serial_number=5555)
         resp = client.get(f"/api/ecu/{ecu.id}")
-        assert resp.json()["serial_number"] == 5555
+        assert resp.json()["serial_number"] == "5555"
 
     def test_returns_404_when_not_found(self, client):
         resp = client.get("/api/ecu/9999")
