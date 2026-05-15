@@ -28,6 +28,7 @@ class ECUConfigure(BaseModel):
     vehicle_class: VehicleClass | None = None
     vehicle_type: VehicleType | None = None
     firmware_version: str | None = None
+    power_limit_watts: float | None = None
 
 
 class ECUResponse(ECUBase):

@@ -42,6 +42,40 @@ MAX_FRAMES = 3
 # Time sync
 # ---------------------------------------------------------------------------
 
+def handle_power_limit_request(ser: serial.Serial, line: str) -> None:
+    """Handle a power_limit_request line from the controller.
+
+    The controller sends:
+        {"type":"power_limit_request","mac":"AA:BB:CC:DD:EE:FF"}
+    We respond with:
+        {"type":"power_limit_response","mac":"...","power_limit_watts":350.0}
+    """
+    try:
+        req = json.loads(line)
+        mac = req.get("mac", "")
+    except json.JSONDecodeError:
+        logger.warning("power_limit_request: invalid JSON — %r", line[:120])
+        return
+
+    from sqlalchemy import select
+    from app.models.ecu import ECU
+    db = SessionLocal()
+    try:
+        ecu = db.scalar(select(ECU).where(ECU.mac_address == mac))
+        power_limit = float(ecu.power_limit_watts) if ecu else 350.0
+    finally:
+        db.close()
+
+    response = json.dumps({
+        "type": "power_limit_response",
+        "mac": mac,
+        "power_limit_watts": power_limit,
+    }) + "\n"
+    ser.write(response.encode("ascii"))
+    ser.flush()
+    logger.info("Power limit response sent: %.1f W for MAC %s", power_limit, mac)
+
+
 def handle_time_sync(ser: serial.Serial) -> bool:
     logger.info("Waiting for TIME_REQUEST from controller...")
     ser.timeout = 6
@@ -210,6 +244,9 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
                 continue
             if not line.startswith('{'):
                 logger.debug("Ignoring non-JSON line: %r", line[:80])
+                continue
+            if '"power_limit_request"' in line:
+                handle_power_limit_request(ser, line)
                 continue
             packet = parse_packet(line)
             if packet is None:

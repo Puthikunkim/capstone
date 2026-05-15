@@ -76,7 +76,12 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 
 	if "vehicle_class" in updates and updates["vehicle_class"] is not None:
 		ecu.vehicle_class = _coerce_vehicle_class(updates["vehicle_class"]) or ecu.vehicle_class
-		ecu.power_limit_watts = _default_power_limit(ecu.vehicle_class)
+		# Only apply the class default when no explicit power_limit_watts is provided
+		if "power_limit_watts" not in updates or updates["power_limit_watts"] is None:
+			ecu.power_limit_watts = _default_power_limit(ecu.vehicle_class)
+
+	if "power_limit_watts" in updates and updates["power_limit_watts"] is not None:
+		ecu.power_limit_watts = float(updates["power_limit_watts"])
 
 	if "vehicle_type" in updates and updates["vehicle_type"] is not None:
 		ecu.vehicle_type = _coerce_vehicle_type(updates["vehicle_type"]) or ecu.vehicle_type
