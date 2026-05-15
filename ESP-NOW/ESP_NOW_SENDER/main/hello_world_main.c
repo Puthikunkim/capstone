@@ -85,7 +85,7 @@ typedef struct {
 // ====== Sending buffer ======
 typedef struct {
     uint16_t counter;
-    uint16_t time_100ms;
+    uint32_t time_100ms;  // uint16_t overflowed at ~109 min boot time
     uint8_t  current_packed[15];
     uint8_t  voltage_packed[15];
 } buffered_frame_t;
@@ -207,7 +207,7 @@ static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
     buffered_frame_t *f = &send_buffer[slot];
 
     f->counter    = next_counter;
-    f->time_100ms = (uint16_t)(esp_timer_get_time() / 100000);
+    f->time_100ms = (uint32_t)(esp_timer_get_time() / 100000);
 
     uint16_t tmp_c[SAMPLES_PER_FRAME];
     uint16_t tmp_v[SAMPLES_PER_FRAME];
@@ -629,6 +629,9 @@ static void buffer_monitor_task(void *arg) {
 ---------------------------------------------------------------*/
 
 void app_main(void) {
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
 
     wifi_init();

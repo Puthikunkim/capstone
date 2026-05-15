@@ -107,9 +107,9 @@ static uint8_t      my_mac[6];
 // Stores the ISO timestamp received from the backend and the
 // esp_timer value at the moment it was received. Used to compute
 // current real time for any WELCOME packet sent to a sender.
-static char    controller_sync_timestamp[32] = "2026-04-26T12:00:00.000000";
+static char    controller_sync_timestamp[32] = "";
 static int64_t controller_sync_boot_us       = 0;
-static bool    time_synced                   = true;
+static bool    time_synced                   = false;
 // ───────────────────────────────────────────────────────────────
 
 /*---------------------------------------------------------------
@@ -119,49 +119,52 @@ static bool    time_synced                   = true;
     responds with a JSON line: {"timestamp":"2026-01-01T00:00:00.000000"}
 ---------------------------------------------------------------*/
 static void request_time_from_backend(void) {
-    // send request to backend
     uart_write_bytes(UART_PORT, TIME_REQUEST_STR, strlen(TIME_REQUEST_STR));
     ESP_LOGI(TAG, "Sent TIME_REQUEST to backend, waiting...");
 
-    // block and read response line
     char buf[TIME_RESPONSE_BUF_LEN];
-    memset(buf, 0, sizeof(buf));
-    int idx = 0;
     int64_t deadline = esp_timer_get_time() + 5000000LL; // 5s timeout
 
-    while (esp_timer_get_time() < deadline && idx < (int)sizeof(buf) - 1) {
-        uint8_t c;
-        int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(100));
-        if (r > 0) {
-            buf[idx++] = c;
-            if (c == '\n') break;
-        }
-    }
+    // Loop through lines until we find one containing "timestamp" — the
+    // backend may send other data (echo, status) before the response line.
+    while (esp_timer_get_time() < deadline) {
+        memset(buf, 0, sizeof(buf));
+        int idx = 0;
 
-    // parse {"timestamp":"2026-01-01T00:00:00.000000"}
-    char *start = strstr(buf, "\"timestamp\"");
-    if (start) {
-        start = strchr(start, ':');
-        if (start) {
-            start++;
-            while (*start == ' ' || *start == '"') start++;
-            char *end = strchr(start, '"');
-            if (end) {
-                size_t len = end - start;
-                if (len < sizeof(controller_sync_timestamp)) {
-                    strncpy(controller_sync_timestamp, start, len);
-                    controller_sync_timestamp[len] = '\0';
-                    controller_sync_boot_us = esp_timer_get_time();
-                    time_synced = true;
-                    ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
-                }
+        while (esp_timer_get_time() < deadline && idx < (int)sizeof(buf) - 1) {
+            uint8_t c;
+            int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(50));
+            if (r > 0) {
+                buf[idx++] = c;
+                if (c == '\n') break;
             }
         }
+
+        if (idx == 0) continue;
+
+        // parse {"timestamp":"2026-01-01T00:00:00.000000"}
+        char *start = strstr(buf, "\"timestamp\"");
+        if (!start) continue;
+
+        start = strchr(start, ':');
+        if (!start) continue;
+        start++;
+        while (*start == ' ' || *start == '"') start++;
+        char *end = strchr(start, '"');
+        if (!end) continue;
+
+        size_t len = end - start;
+        if (len < sizeof(controller_sync_timestamp)) {
+            strncpy(controller_sync_timestamp, start, len);
+            controller_sync_timestamp[len] = '\0';
+            controller_sync_boot_us = esp_timer_get_time();
+            time_synced = true;
+            ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
+            return;
+        }
     }
 
-    if (!time_synced) {
-        ESP_LOGE(TAG, "Time sync failed — timestamps will be empty");
-    }
+    ESP_LOGE(TAG, "Time sync failed — no valid timestamp received from backend");
 }
 
 /*---------------------------------------------------------------
@@ -442,6 +445,9 @@ static void wifi_init(void) {
 ---------------------------------------------------------------*/
 
 void app_main(void) {
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
     wifi_init();
 
     uart_config_t uart_cfg = {
