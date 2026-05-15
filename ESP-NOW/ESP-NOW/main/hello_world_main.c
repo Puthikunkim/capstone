@@ -93,7 +93,6 @@ typedef enum {
 
 typedef struct {
     uint8_t  mac[6];
-    uint8_t  ecu_id;
     uint16_t confirmed_floor;
     int64_t  last_seen_us;
     node_status_t  status;
@@ -227,7 +226,8 @@ static node_state_t *register_node(const uint8_t *mac) {
     if (existing) {
         existing->status       = NODE_STREAMING;
         existing->last_seen_us = esp_timer_get_time();
-        ESP_LOGI(TAG, "ECU%d reconnected", existing->ecu_id);
+        ESP_LOGI(TAG, "Node reconnected: MAC=%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         return existing;
     }
 
@@ -238,13 +238,11 @@ static node_state_t *register_node(const uint8_t *mac) {
 
     node_state_t *node = &registry[registry_count++];
     memcpy(node->mac, mac, 6);
-    node->ecu_id          = registry_count;
     node->confirmed_floor = 0;
     node->last_seen_us    = esp_timer_get_time();
     node->status          = NODE_STREAMING;
 
-    ESP_LOGI(TAG, "New node registered: ECU%d MAC=%02X:%02X:%02X:%02X:%02X:%02X",
-             node->ecu_id,
+    ESP_LOGI(TAG, "New node registered: MAC=%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     return node;
 }
@@ -268,13 +266,15 @@ static void add_peer(const uint8_t *mac) {
     UART JSON output
 ---------------------------------------------------------------*/
 
-static void uart_send_json(const adc_packet_t *pkt, uint32_t rx_time_ms) {
+static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, uint32_t rx_time_ms) {
     char buf[600];
     int pos = 0;
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-                    "{\"ecu_id\":%d,\"rx_time_ms\":%lu,\"frames\":[",
-                    pkt->sender_id, (unsigned long)rx_time_ms);
+                    "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"rx_time_ms\":%lu,\"frames\":[",
+                    sender_mac[0], sender_mac[1], sender_mac[2],
+                    sender_mac[3], sender_mac[4], sender_mac[5],
+                    (unsigned long)rx_time_ms);
 
     for (int f = 0; f < pkt->frame_count; f++) {
         const adc_frame_t *frame = &pkt->frames[f];
@@ -317,30 +317,21 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     if (msg_type == MSG_REGISTER && len == sizeof(register_packet_t)) {
         const register_packet_t *reg = (const register_packet_t *)data;
 
-        add_peer(reg->sender_mac);
-        node_state_t *node = register_node(reg->sender_mac);
+        add_peer(info->src_addr);
+        node_state_t *node = register_node(info->src_addr);
         if (!node) return;
 
-        // ── [MODIFIED] WELCOME now includes sync_timestamp ─────
-        // Original:
-        // welcome_packet_t welcome = {
-        //     .msg_type    = MSG_WELCOME,
-        //     .assigned_id = node->ecu_id,
-        // };
-        //
-        // Changed: piggyback current real timestamp so sender can
-        // anchor its clock without WiFi or NTP
         welcome_packet_t welcome = {
             .msg_type    = MSG_WELCOME,
-            .assigned_id = node->ecu_id,
+            .assigned_id = 0,
         };
-        get_current_timestamp(welcome.sync_timestamp,       // [ADDED]
-                              sizeof(welcome.sync_timestamp)); // [ADDED]
-        // ───────────────────────────────────────────────────────
+        get_current_timestamp(welcome.sync_timestamp, sizeof(welcome.sync_timestamp));
 
-        esp_now_send(reg->sender_mac, (uint8_t *)&welcome, sizeof(welcome));
-        ESP_LOGI(TAG, "Sent WELCOME to ECU%d with timestamp: %s",
-                 node->ecu_id, welcome.sync_timestamp); // [MODIFIED] log
+        esp_now_send(info->src_addr, (uint8_t *)&welcome, sizeof(welcome));
+        ESP_LOGI(TAG, "Sent WELCOME to %02X:%02X:%02X:%02X:%02X:%02X ts=%s",
+                 info->src_addr[0], info->src_addr[1], info->src_addr[2],
+                 info->src_addr[3], info->src_addr[4], info->src_addr[5],
+                 welcome.sync_timestamp);
         return;
     }
 
@@ -363,14 +354,16 @@ static void on_data_recv(const esp_now_recv_info_t *info,
                 node->confirmed_floor = pkt->frames[i].counter;
         }
 
-        ESP_LOGI(TAG, "ECU%d | %d frame(s) | floor=%d",
-                 pkt->sender_id, pkt->frame_count, node->confirmed_floor);
+        ESP_LOGI(TAG, "Sender %02X:%02X:%02X:%02X:%02X:%02X | %d frame(s) | floor=%d",
+                 info->src_addr[0], info->src_addr[1], info->src_addr[2],
+                 info->src_addr[3], info->src_addr[4], info->src_addr[5],
+                 pkt->frame_count, node->confirmed_floor);
 
-        uart_send_json(pkt, rx_time_ms);
+        uart_send_json(pkt, info->src_addr, rx_time_ms);
 
         ack_packet_t ack = {
             .msg_type        = MSG_ACK,
-            .ack_to          = node->ecu_id,
+            .ack_to          = 0,
             .confirmed_floor = node->confirmed_floor,
         };
         esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
@@ -415,7 +408,9 @@ static void watchdog_task(void *arg) {
             if (node->status == NODE_STREAMING &&
                 now - node->last_seen_us > DISCONNECT_TIMEOUT_US) {
                 node->status = NODE_DISCONNECTED;
-                ESP_LOGW(TAG, "ECU%d DISCONNECTED (5min timeout)", node->ecu_id);
+                ESP_LOGW(TAG, "Sender %02X:%02X:%02X:%02X:%02X:%02X DISCONNECTED (5min timeout)",
+                         node->mac[0], node->mac[1], node->mac[2],
+                         node->mac[3], node->mac[4], node->mac[5]);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
