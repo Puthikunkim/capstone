@@ -7,9 +7,9 @@ from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.energy_frame import EnergyFrame
 
 
-def make_ecu(db, serial_number=1001, power_limit_watts=350.0):
+def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01", power_limit_watts=350.0):
     ecu = ECU(
-        serial_number=serial_number,
+        mac_address=mac_address,
         team_number=1,
         vehicle_class=VehicleClass.STANDARD,
         vehicle_type=VehicleType.BIKE,
@@ -65,8 +65,8 @@ class TestListAlerts:
         assert len(resp.json()) == 1
 
     def test_filters_by_ecu_id(self, client, db):
-        ecu1 = make_ecu(db, serial_number=1001)
-        ecu2 = make_ecu(db, serial_number=1002)
+        ecu1 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
+        ecu2 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
         frame1 = make_frame(db, ecu1.id)
         frame2 = make_frame(db, ecu2.id)
         make_alert(db, ecu1.id, frame1.id)

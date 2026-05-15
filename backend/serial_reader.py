@@ -127,33 +127,33 @@ async def process_frames(queue: asyncio.Queue) -> None:
     while True:
         frame = await queue.get()
         try:
-            ecu_serial = str(frame["sender_id"])
+            mac_address = str(frame["sender_id"])
 
             try:
                 timestamp = datetime.fromisoformat(frame["tx_time_ms"])
             except (KeyError, ValueError):
                 logger.warning(
-                    "Bad timestamp %r on ECU %s counter=%d, using server time",
-                    frame.get("tx_time_ms"), ecu_serial, frame["counter"],
+                    "Bad timestamp %r on MAC %s counter=%d, using server time",
+                    frame.get("tx_time_ms"), mac_address, frame["counter"],
                 )
                 timestamp = datetime.now(timezone.utc)
 
             try:
                 ingest = EnergyFrameIngest(
-                    ecu_serial=ecu_serial,
+                    mac_address=mac_address,
                     timestamp=timestamp,
                     voltage_samples=frame["voltage"],
                     current_samples=frame["current"],
                 )
             except ValidationError as exc:
                 logger.warning(
-                    "Schema validation failed for ECU %s counter=%d: %s",
-                    ecu_serial, frame["counter"], exc,
+                    "Schema validation failed for MAC %s counter=%d: %s",
+                    mac_address, frame["counter"], exc,
                 )
                 continue
 
             processed = {
-                "ecu_serial":  ingest.ecu_serial,
+                "mac_address": ingest.mac_address,
                 "timestamp":   ingest.timestamp,
                 "avg_voltage": convert_voltage_and_average(ingest.voltage_samples),
                 "avg_current": convert_current_and_average(ingest.current_samples),
@@ -164,8 +164,8 @@ async def process_frames(queue: asyncio.Queue) -> None:
                 _, created = await persist_and_broadcast_frame(db, processed)
                 if created:
                     logger.info(
-                        "Frame saved — ECU %s  counter=%d  esp_ts=%s  V=%.2f  A=%.3f",
-                        ecu_serial,
+                        "Frame saved — MAC %s  counter=%d  esp_ts=%s  V=%.2f  A=%.3f",
+                        mac_address,
                         frame["counter"],
                         frame.get("tx_time_ms", "?"),
                         processed["avg_voltage"],
@@ -173,8 +173,8 @@ async def process_frames(queue: asyncio.Queue) -> None:
                     )
                 else:
                     logger.debug(
-                        "Duplicate frame skipped — ECU %s  counter=%d",
-                        ecu_serial, frame["counter"],
+                        "Duplicate frame skipped — MAC %s  counter=%d",
+                        mac_address, frame["counter"],
                     )
             finally:
                 db.close()

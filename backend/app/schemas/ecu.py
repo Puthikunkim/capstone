@@ -12,7 +12,6 @@ from app.models.ecu import VehicleClass, VehicleType
 
 
 class ECUBase(BaseModel):
-    serial_number: str
     team_number: int
     vehicle_class: VehicleClass
     vehicle_type: VehicleType
@@ -33,6 +32,7 @@ class ECUConfigure(BaseModel):
 
 class ECUResponse(ECUBase):
     id: int
+    mac_address: str | None
     team_id: int | None
     last_seen: datetime | None
     temperature: float | None

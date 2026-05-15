@@ -117,7 +117,7 @@ def score_event_from_energy(
     start_utc = _to_utc(start)
     end_utc = _to_utc(end)
 
-    ecus = list(db.scalars(select(ECU).order_by(ECU.team_number.asc(), ECU.serial_number.asc())).all())
+    ecus = list(db.scalars(select(ECU).order_by(ECU.team_number.asc(), ECU.mac_address.asc().nullslast())).all())
     aggregates = _load_aggregates(db, start_utc, end_utc)
 
     bracket_map: dict[tuple[VehicleClass, VehicleType], list[ECU]] = defaultdict(list)
@@ -138,7 +138,7 @@ def score_event_from_energy(
                         ScoringEntryResponse(
                             rank=None,
                             ecu_id=ecu.id,
-                            serial_number=ecu.serial_number,
+                            mac_address=ecu.mac_address,
                             team_number=ecu.team_number,
                             status=ScoringStatus.DNF,
                             score=0.0,
@@ -156,7 +156,7 @@ def score_event_from_energy(
         entries: list[ScoringEntryResponse] = []
 
         if scored_candidates:
-            scored_candidates.sort(key=lambda item: (item[2], item[0].team_number, item[0].serial_number))
+            scored_candidates.sort(key=lambda item: (item[2], item[0].team_number, item[0].mac_address or ""))
             best_metric = scored_candidates[0][2]
             worst_metric = scored_candidates[-1][2]
 
@@ -171,7 +171,7 @@ def score_event_from_energy(
                     ScoringEntryResponse(
                         rank=current_rank,
                         ecu_id=ecu.id,
-                        serial_number=ecu.serial_number,
+                        mac_address=ecu.mac_address,
                         team_number=ecu.team_number,
                         status=ScoringStatus.SCORED,
                         score=_interpolated_score(metric_value, best_metric, worst_metric),
