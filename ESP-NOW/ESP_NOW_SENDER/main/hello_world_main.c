@@ -32,8 +32,7 @@ static const char *TAG = "SENDER";
 #define MSG_WELCOME           0x03
 #define MSG_DATA              0x04
 #define MSG_ACK               0x05
-#define MSG_POWER_LIMIT_REQ   0x06  // sender → controller: request power limit
-#define MSG_POWER_LIMIT       0x07  // controller → sender: deliver power limit
+#define MSG_POWER_LIMIT       0x06  // controller → sender: deliver power limit
 
 // ====== Data schema ======
 typedef struct {
@@ -48,7 +47,6 @@ typedef struct {
 
 typedef struct {
     uint8_t  msg_type;
-    uint8_t  assigned_id;
     char     sync_timestamp[32];
 } __attribute__((packed)) welcome_packet_t;
 
@@ -61,24 +59,16 @@ typedef struct {
 
 typedef struct {
     uint8_t     msg_type;
-    uint8_t     sender_id;
     uint8_t     frame_count;
     adc_frame_t frames[MAX_FRAMES_PER_PKT];
 } __attribute__((packed)) adc_packet_t;
 
 typedef struct {
     uint8_t  msg_type;
-    uint8_t  ack_to;
     uint16_t confirmed_floor;
 } __attribute__((packed)) ack_packet_t;
 
-// sender_mac: MAC of the sender requesting its power limit
-typedef struct {
-    uint8_t  msg_type;
-    uint8_t  sender_mac[6];
-} __attribute__((packed)) power_limit_req_packet_t;
-
-// power_limit_mw: limit in milliwatts, delivered by the controller
+// power_limit_mw: limit in milliwatts, pushed by the controller
 typedef struct {
     uint8_t  msg_type;
     int32_t  power_limit_mw;
@@ -104,7 +94,6 @@ static volatile bool    over_power_flag    = false;
 // ====== Status ======
 static uint8_t  my_mac[6];
 static uint8_t  controller_mac[6];
-static uint8_t  my_id            = 0;
 static bool     registered       = false;
 static volatile bool waiting_ack = false;
 static volatile int64_t last_send_time = 0;
@@ -246,7 +235,6 @@ static void buffer_clear_acked(uint16_t floor) {
 
 static uint8_t build_packet(adc_packet_t *pkt) {
     pkt->msg_type    = MSG_DATA;
-    pkt->sender_id   = my_id;
     pkt->frame_count = 0;
 
     uint16_t start = confirmed_floor + 1;
@@ -338,7 +326,6 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     // ── WELCOME: save ID, anchor time sync, start tasks, request power limit ──
     if (msg_type == MSG_WELCOME && len == sizeof(welcome_packet_t)) {
         const welcome_packet_t *welcome = (const welcome_packet_t *)data;
-        my_id      = welcome->assigned_id;
         registered = true;
 
         // Anchor real wall-clock time from the controller's timestamp
@@ -366,30 +353,16 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
         time_synced = true;
 
-        ESP_LOGI(TAG, "Registered! Assigned ID = %d, sync time = %s",
-                 my_id, sync_timestamp);
+        ESP_LOGI(TAG, "Registered! sync time = %s", sync_timestamp);
 
         xTaskCreate(adc_task,    "adc_task",    4096, NULL, 6, NULL);
         xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, NULL);
-
-        // Request the power limit for this sender from the controller.
-        // The controller will ask the backend and relay the response.
-        power_limit_req_packet_t plreq = {
-            .msg_type = MSG_POWER_LIMIT_REQ,
-        };
-        memcpy(plreq.sender_mac, my_mac, 6);
-        esp_now_send(controller_mac, (uint8_t *)&plreq, sizeof(plreq));
-        ESP_LOGI(TAG, "Sent POWER_LIMIT_REQ to controller for MAC "
-                 "%02X:%02X:%02X:%02X:%02X:%02X",
-                 my_mac[0], my_mac[1], my_mac[2],
-                 my_mac[3], my_mac[4], my_mac[5]);
         return;
     }
 
     // ── ACK ──
     if (msg_type == MSG_ACK && len == sizeof(ack_packet_t)) {
         const ack_packet_t *ack = (const ack_packet_t *)data;
-        if (ack->ack_to != my_id) return;
         buffer_clear_acked(ack->confirmed_floor);
         waiting_ack = false;
         ESP_LOGI(TAG, "ACK floor=%d", ack->confirmed_floor);
@@ -472,7 +445,7 @@ static void wifi_init(void) {
 void adc_task(void *arg) {
     int64_t last_sample_time = 0;
 
-    ESP_LOGI(TAG, "ADC task started as ECU%d", my_id);
+    ESP_LOGI(TAG, "ADC task started");
 
     while (1) {
         int64_t now = esp_timer_get_time() / 1000;
@@ -528,7 +501,7 @@ void sender_task(void *arg) {
     int     sample_index = 0;
     int64_t now = 0;
 
-    ESP_LOGI(TAG, "Sender task started as ECU%d", my_id);
+    ESP_LOGI(TAG, "Sender task started");
 
     while (1) {
         xSemaphoreTake(ring_mutex, portMAX_DELAY);

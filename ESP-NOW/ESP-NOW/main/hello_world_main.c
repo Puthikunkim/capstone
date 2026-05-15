@@ -30,8 +30,6 @@ static const char *TAG = "CONTROLLER";
 #define TIME_REQUEST_STR      "TIME_REQUEST\n"
 #define TIME_RESPONSE_BUF_LEN 128
 
-// Timeout waiting for a power_limit_response from the backend (µs)
-#define POWER_LIMIT_UART_TIMEOUT_US 2000000LL
 
 // ====== Message type ======
 #define MSG_HELLO             0x01
@@ -39,8 +37,7 @@ static const char *TAG = "CONTROLLER";
 #define MSG_WELCOME           0x03
 #define MSG_DATA              0x04
 #define MSG_ACK               0x05
-#define MSG_POWER_LIMIT_REQ   0x06  // sender → controller: request power limit
-#define MSG_POWER_LIMIT       0x07  // controller → sender: deliver power limit
+#define MSG_POWER_LIMIT       0x06  // controller → sender: deliver power limit
 
 // ====== Data schema ======
 typedef struct {
@@ -55,7 +52,6 @@ typedef struct {
 
 typedef struct {
     uint8_t  msg_type;
-    uint8_t  assigned_id;
     char     sync_timestamp[32];
 } __attribute__((packed)) welcome_packet_t;
 
@@ -68,24 +64,16 @@ typedef struct {
 
 typedef struct {
     uint8_t    msg_type;
-    uint8_t    sender_id;
     uint8_t    frame_count;
     adc_frame_t frames[MAX_FRAMES_PER_PKT];
 } __attribute__((packed)) adc_packet_t;
 
 typedef struct {
     uint8_t  msg_type;
-    uint8_t  ack_to;
     uint16_t confirmed_floor;
 } __attribute__((packed)) ack_packet_t;
 
-// sender_mac: MAC of the sender whose limit is being requested
-typedef struct {
-    uint8_t  msg_type;
-    uint8_t  sender_mac[6];
-} __attribute__((packed)) power_limit_req_packet_t;
-
-// power_limit_mw: limit in milliwatts, forwarded to the sender
+// power_limit_mw: limit in milliwatts, pushed to the sender
 typedef struct {
     uint8_t  msg_type;
     int32_t  power_limit_mw;
@@ -114,18 +102,9 @@ static char    controller_sync_timestamp[32] = "";
 static int64_t controller_sync_boot_us       = 0;
 static bool    time_synced                   = false;
 
-// ====== UART mutex & power-limit request queue ======
-// uart_mutex: prevents uart_send_json and uart_power_limit_task from
+// uart_mutex: prevents uart_send_json and uart_listener_task from
 // interleaving their writes on the TX line.
 static SemaphoreHandle_t uart_mutex;
-
-// Queue element: MAC address of the sender that requested its power limit
-typedef struct {
-    uint8_t mac[6];
-} power_limit_req_t;
-
-// Depth-10 queue so bursts of requests don't drop
-static QueueHandle_t power_limit_req_queue;
 
 /*---------------------------------------------------------------
     Time sync — request timestamp from backend over UART
@@ -274,7 +253,10 @@ static void add_peer(const uint8_t *mac) {
 
 static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, uint32_t rx_time_ms) {
     char buf[600];
+    char ts[27];
     int pos = 0;
+
+    get_current_timestamp(ts, sizeof(ts));
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
                     "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"rx_time_ms\":%lu,\"frames\":[",
@@ -286,9 +268,8 @@ static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, u
         const adc_frame_t *frame = &pkt->frames[f];
 
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-                        "{\"counter\":%d,\"tx_time_ms\":%lu,\"voltage\":[",
-                        frame->counter,
-                        (unsigned long)frame->time_since_boot_ms);
+                        "{\"counter\":%d,\"tx_time_ms\":\"%s\",\"voltage\":[",
+                        frame->counter, ts);
 
         for (int i = 0; i < SAMPLES_PER_FRAME; i++)
             pos += snprintf(buf + pos, sizeof(buf) - pos,
@@ -314,86 +295,74 @@ static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, u
 }
 
 /*---------------------------------------------------------------
-    UART power-limit task
-    Dequeues power limit requests from on_data_recv, sends a UART
-    query to the backend, waits for the response, then forwards the
-    limit to the requesting sender via ESP-NOW MSG_POWER_LIMIT.
----------------------------------------------------------------*/
+    UART listener task
+    Reads lines from the Python backend. When it sees a power_limit
+    message it forwards the limit to the right sender via ESP-NOW.
 
-static void uart_power_limit_task(void *arg) {
-    power_limit_req_t req;
-    char req_buf[96];
-    char resp_buf[160];
+    Expected format from Python:
+      {"type":"power_limit","mac":"AA:BB:CC:DD:EE:FF","power_limit_watts":350.0}\n
+---------------------------------------------------------------*/
+static void uart_listener_task(void *arg) {
+    char buf[160];
 
     while (1) {
-        // Block until a sender requests its power limit
-        if (xQueueReceive(power_limit_req_queue, &req, portMAX_DELAY) != pdTRUE)
-            continue;
-
-        // Send query to backend: {"type":"power_limit_request","mac":"AA:BB:CC:..."}\n
-        int req_len = snprintf(req_buf, sizeof(req_buf),
-            "{\"type\":\"power_limit_request\","
-            "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\"}\n",
-            req.mac[0], req.mac[1], req.mac[2],
-            req.mac[3], req.mac[4], req.mac[5]);
-
-        xSemaphoreTake(uart_mutex, portMAX_DELAY);
-        uart_write_bytes(UART_PORT, req_buf, req_len);
-        xSemaphoreGive(uart_mutex);
-
-        ESP_LOGI(TAG, "Sent power_limit_request to backend for MAC "
-                 "%02X:%02X:%02X:%02X:%02X:%02X",
-                 req.mac[0], req.mac[1], req.mac[2],
-                 req.mac[3], req.mac[4], req.mac[5]);
-
-        // Wait for: {"type":"power_limit_response","mac":"...","power_limit_watts":350.0}\n
-        memset(resp_buf, 0, sizeof(resp_buf));
+        memset(buf, 0, sizeof(buf));
         int idx = 0;
-        int64_t deadline = esp_timer_get_time() + POWER_LIMIT_UART_TIMEOUT_US;
 
-        while (esp_timer_get_time() < deadline && idx < (int)sizeof(resp_buf) - 1) {
+        while (idx < (int)sizeof(buf) - 1) {
             uint8_t c;
-            int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(50));
+            int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(100));
             if (r > 0) {
-                resp_buf[idx++] = c;
+                buf[idx++] = c;
                 if (c == '\n') break;
             }
         }
 
-        if (idx == 0) {
-            ESP_LOGE(TAG, "Timed out waiting for power_limit_response");
+        if (idx == 0) continue;
+
+        // Only handle power_limit messages
+        if (!strstr(buf, "\"power_limit\"")) continue;
+
+        // Parse MAC: "mac":"AA:BB:CC:DD:EE:FF"
+        char *mac_key = strstr(buf, "\"mac\"");
+        if (!mac_key) continue;
+        mac_key = strchr(mac_key, ':');
+        if (!mac_key) continue;
+        mac_key++;
+        while (*mac_key == ' ' || *mac_key == '"') mac_key++;
+
+        uint8_t mac[6];
+        if (sscanf(mac_key, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+                   &mac[0], &mac[1], &mac[2],
+                   &mac[3], &mac[4], &mac[5]) != 6) {
+            ESP_LOGW(TAG, "power_limit: bad MAC in: %.80s", buf);
             continue;
         }
 
-        // Parse power_limit_watts from the response JSON
-        char *key = strstr(resp_buf, "\"power_limit_watts\"");
-        if (!key) {
-            ESP_LOGE(TAG, "No power_limit_watts in response: %.80s", resp_buf);
+        // Parse power_limit_watts
+        char *watts_key = strstr(buf, "\"power_limit_watts\"");
+        if (!watts_key) continue;
+        watts_key = strchr(watts_key, ':');
+        if (!watts_key) continue;
+        watts_key++;
+        while (*watts_key == ' ') watts_key++;
+        float watts = strtof(watts_key, NULL);
+        int32_t mw  = (int32_t)(watts * 1000.0f);
+
+        // Forward to sender via ESP-NOW
+        node_state_t *node = find_node_by_mac(mac);
+        if (!node) {
+            ESP_LOGW(TAG, "power_limit: MAC not in registry");
             continue;
         }
-        key = strchr(key, ':');
-        if (!key) continue;
-        key++;
-        while (*key == ' ') key++;
-        float power_limit_watts = strtof(key, NULL);
-        int32_t power_limit_mw  = (int32_t)(power_limit_watts * 1000.0f);
 
-        ESP_LOGI(TAG, "Got power limit %.1f W (%ld mW) for MAC "
-                 "%02X:%02X:%02X:%02X:%02X:%02X",
-                 power_limit_watts, power_limit_mw,
-                 req.mac[0], req.mac[1], req.mac[2],
-                 req.mac[3], req.mac[4], req.mac[5]);
-
-        // Forward to the sender via ESP-NOW
         power_limit_packet_t pkt = {
             .msg_type       = MSG_POWER_LIMIT,
-            .power_limit_mw = power_limit_mw,
+            .power_limit_mw = mw,
         };
-        esp_now_send(req.mac, (uint8_t *)&pkt, sizeof(pkt));
-
-        node_state_t *node = find_node_by_mac(req.mac);
-        if (node)
-            ESP_LOGI(TAG, "Sent MSG_POWER_LIMIT to ECU%d", node->ecu_id);
+        esp_now_send(mac, (uint8_t *)&pkt, sizeof(pkt));
+        ESP_LOGI(TAG, "Sent power limit %.1fW to %02X:%02X:%02X:%02X:%02X:%02X",
+                 watts, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 }
 
@@ -415,8 +384,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         if (!node) return;
 
         welcome_packet_t welcome = {
-            .msg_type    = MSG_WELCOME,
-            .assigned_id = 0,
+            .msg_type = MSG_WELCOME,
         };
         get_current_timestamp(welcome.sync_timestamp, sizeof(welcome.sync_timestamp));
 
@@ -456,32 +424,9 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
         ack_packet_t ack = {
             .msg_type        = MSG_ACK,
-            .ack_to          = 0,
             .confirmed_floor = node->confirmed_floor,
         };
         esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
-        return;
-    }
-
-    // ── POWER_LIMIT_REQ: Sender wants its power limit ──
-    if (msg_type == MSG_POWER_LIMIT_REQ && len == sizeof(power_limit_req_packet_t)) {
-        const power_limit_req_packet_t *req = (const power_limit_req_packet_t *)data;
-
-        power_limit_req_t item;
-        memcpy(item.mac, req->sender_mac, 6);
-
-        // Non-blocking enqueue — if the queue is full the request is dropped
-        if (xQueueSend(power_limit_req_queue, &item, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "Power limit request queue full, dropping request from "
-                     "%02X:%02X:%02X:%02X:%02X:%02X",
-                     req->sender_mac[0], req->sender_mac[1], req->sender_mac[2],
-                     req->sender_mac[3], req->sender_mac[4], req->sender_mac[5]);
-        } else {
-            ESP_LOGI(TAG, "Queued power limit request for MAC "
-                     "%02X:%02X:%02X:%02X:%02X:%02X",
-                     req->sender_mac[0], req->sender_mac[1], req->sender_mac[2],
-                     req->sender_mac[3], req->sender_mac[4], req->sender_mac[5]);
-        }
         return;
     }
 
@@ -570,8 +515,7 @@ void app_main(void) {
     uart_driver_install(UART_PORT, 1024, 0, 0, NULL, 0);
     uart_param_config(UART_PORT, &uart_cfg);
 
-    uart_mutex             = xSemaphoreCreateMutex();
-    power_limit_req_queue  = xQueueCreate(10, sizeof(power_limit_req_t));
+    uart_mutex = xSemaphoreCreateMutex();
 
     request_time_from_backend();
 
@@ -581,9 +525,9 @@ void app_main(void) {
     }
     esp_now_register_recv_cb(on_data_recv);
 
-    xTaskCreate(hello_task,             "hello",        2048, NULL, 3, NULL);
-    xTaskCreate(watchdog_task,          "watchdog",     2048, NULL, 2, NULL);
-    xTaskCreate(uart_power_limit_task,  "uart_pwr_lim", 4096, NULL, 4, NULL);
+    xTaskCreate(hello_task,         "hello",        2048, NULL, 3, NULL);
+    xTaskCreate(watchdog_task,      "watchdog",     2048, NULL, 2, NULL);
+    xTaskCreate(uart_listener_task, "uart_listen",  4096, NULL, 4, NULL);
 
     ESP_LOGI(TAG, "Controller ready, broadcasting HELLO...");
 }
