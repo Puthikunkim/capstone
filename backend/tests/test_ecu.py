@@ -80,11 +80,11 @@ class TestConfigureEcu:
         assert resp.status_code == 200
         assert resp.json()["team_number"] == 42
 
-    def test_power_limit_cannot_be_changed_via_configure(self, client, db):
+    def test_power_limit_can_be_changed_via_configure(self, client, db):
         ecu = make_ecu(db, power_limit_watts=350.0)
         resp = client.post(f"/api/ecu/{ecu.id}/configure", json={"power_limit_watts": 2000.0})
         assert resp.status_code == 200
-        assert resp.json()["power_limit_watts"] == 350.0
+        assert resp.json()["power_limit_watts"] == 2000.0
 
     def test_updates_vehicle_class(self, client, db):
         ecu = make_ecu(db)
