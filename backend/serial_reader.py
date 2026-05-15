@@ -1,24 +1,16 @@
 """Serial reader for ESP32 communication.
 
-Reads binary adc_packet_t structs from serial port and dispatches to handlers.
+Reads newline-delimited JSON packets from the controller over UART and
+dispatches frames to the ingest pipeline.
 
-Packet layout (little-endian, all fields packed):
-  magic        4 bytes  (0xFF 0xFF 0xFF 0xFF)
-  adc_packet_t (216 bytes total)
-    msg_type     uint8
-    sender_id    uint8
-    frame_count  uint8
-    frames       adc_frame_t[MAX_FRAMES=3]
+JSON packet format (one line per packet):
+  {"mac": "<AA:BB:CC:DD:EE:FF>", "rx_time_ms": <int>, "frames": [<frame>, ...]}
 
-  adc_frame_t  (71 bytes each)
-    counter      uint16
-    frame        uint16
-    timestamp    char[27]   (null-padded ISO string)
-    current      int16[10]
-    voltage      int16[10]
+  frame:
+    {"counter": <int>, "tx_time_ms": <int>, "voltage": [<int> x10], "current": [<int> x10]}
 
 Usage:
-    python serial_reader.py --port COM3 --baud 115200
+    python serial_reader.py --port /dev/ttyUSB0 --baud 115200
 """
 
 from __future__ import annotations
@@ -27,7 +19,6 @@ import argparse
 import asyncio
 import json
 import logging
-import struct
 import queue
 import threading
 from datetime import datetime, timezone
@@ -43,17 +34,8 @@ from app.services.processing import convert_current_and_average, convert_voltage
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# ── UART framing — must match controller UART framing registry ───
-MAGIC = b'\xFF\xFF\xFF\xFF'
 SAMPLES = 10
 MAX_FRAMES = 3
-
-# adc_frame_t: counter(H) frame(H) timestamp(27s) current(10h) voltage(10h)
-FRAME_FMT = '<HH27s10h10h'
-FRAME_SIZE = struct.calcsize(FRAME_FMT)  # 71 bytes
-PACKET_SIZE = 3 + (FRAME_SIZE * MAX_FRAMES)  # 216 bytes
-
-MSG_TYPE_ADC = 0x04
 
 
 # ---------------------------------------------------------------------------
@@ -87,63 +69,52 @@ def handle_time_sync(ser: serial.Serial) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Sync + parse (runs in executor thread)
+# JSON line reader + parser (runs in executor thread)
 # ---------------------------------------------------------------------------
 
-def sync_to_packet(ser: serial.Serial) -> bytes:
+def _read_line(ser: serial.Serial) -> str | None:
+    """Read one newline-terminated line from the serial port. Returns None on timeout."""
     buf = b''
-    garbage = b''
     while True:
         byte = ser.read(1)
         if not byte:
-            continue
-        # Accumulate into rolling 4-byte window; bytes that fall out of the
-        # window before MAGIC is found are genuine garbage (not the MAGIC bytes themselves).
-        if len(buf) == 4:
-            garbage += buf[:1]
-        buf = (buf + byte)[-4:]
-        if buf == MAGIC:
-            if garbage:
-                logger.warning(
-                    "sync: discarded %d garbage byte(s) before MAGIC — hex: %s",
-                    len(garbage), garbage.hex(),
-                )
-            raw = ser.read(PACKET_SIZE)
-            if len(raw) < PACKET_SIZE:
-                logger.warning("sync: short read — expected %d bytes got %d", PACKET_SIZE, len(raw))
-            return raw
+            return None
+        if byte == b'\n':
+            return buf.decode('ascii', errors='replace').strip()
+        buf += byte
 
 
-def parse_packet(raw: bytes) -> dict | None:
-    if len(raw) < PACKET_SIZE:
-        logger.warning("parse: packet too short — %d bytes (expected %d), dropping", len(raw), PACKET_SIZE)
+def parse_packet(line: str) -> dict | None:
+    """Parse a JSON line from the controller into the internal packet dict."""
+    try:
+        pkt = json.loads(line)
+    except json.JSONDecodeError as exc:
+        logger.warning("parse: invalid JSON — %s | raw: %r", exc, line[:120])
         return None
 
-    msg_type = raw[0]
-    sender_id = raw[1]
-    frame_count = raw[2]
+    mac = pkt.get("mac")
+    frames_raw = pkt.get("frames", [])
 
-    if frame_count < 1 or frame_count > MAX_FRAMES:
-        logger.warning("parse: invalid frame_count=%d (sender_id=%d msg_type=0x%02X) — dropping, likely out of sync",
-                       frame_count, sender_id, msg_type)
+    if not isinstance(frames_raw, list) or not frames_raw:
+        logger.warning("parse: missing or empty frames in packet from %s", mac)
+        return None
+
+    if len(frames_raw) > MAX_FRAMES:
+        logger.warning("parse: frame_count=%d exceeds MAX_FRAMES=%d — dropping", len(frames_raw), MAX_FRAMES)
         return None
 
     frames = []
-    for i in range(frame_count):
-        offset = 3 + i * FRAME_SIZE
-        counter, frame_num, ts_raw, *samples = struct.unpack_from(FRAME_FMT, raw, offset)
+    for f in frames_raw:
         frames.append({
-            "counter":    counter,
-            "frame":      frame_num,
-            "tx_time_ms": ts_raw.rstrip(b'\x00').decode('ascii', errors='replace'),
-            "current":    list(samples[:SAMPLES]),
-            "voltage":    list(samples[SAMPLES:]),
+            "counter":    f.get("counter", 0),
+            "tx_time_ms": str(f.get("tx_time_ms", "")),
+            "current":    f.get("current", []),
+            "voltage":    f.get("voltage", []),
         })
 
     return {
-        "msg_type":    msg_type,
-        "sender_id":   sender_id,
-        "frame_count": frame_count,
+        "sender_id":   mac,
+        "frame_count": len(frames),
         "frames":      frames,
     }
 
@@ -231,11 +202,16 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
     if not handle_time_sync(ser):
         logger.warning("Time sync failed — ECU timestamps will be epoch")
 
-    logger.info("Listening for packets (%d bytes each)…", PACKET_SIZE)
+    logger.info("Listening for JSON packets...")
     try:
         while True:
-            raw = sync_to_packet(ser)
-            packet = parse_packet(raw)
+            line = _read_line(ser)
+            if not line:
+                continue
+            if not line.startswith('{'):
+                logger.debug("Ignoring non-JSON line: %r", line[:80])
+                continue
+            packet = parse_packet(line)
             if packet is None:
                 continue
             for frame in packet["frames"]:
