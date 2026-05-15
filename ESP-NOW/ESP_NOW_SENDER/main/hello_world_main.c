@@ -13,9 +13,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
-// ── [ADDED] time sync headers ──────────────────────────────────
 #include <time.h>
-// ───────────────────────────────────────────────────────────────
 
 static const char *TAG = "SENDER";
 
@@ -29,11 +27,13 @@ static const char *TAG = "SENDER";
 #define ACK_TIMEOUT_MS        200
 
 // ====== Msg type ======
-#define MSG_HELLO     0x01
-#define MSG_REGISTER  0x02
-#define MSG_WELCOME   0x03
-#define MSG_DATA      0x04
-#define MSG_ACK       0x05
+#define MSG_HELLO             0x01
+#define MSG_REGISTER          0x02
+#define MSG_WELCOME           0x03
+#define MSG_DATA              0x04
+#define MSG_ACK               0x05
+#define MSG_POWER_LIMIT_REQ   0x06  // sender → controller: request power limit
+#define MSG_POWER_LIMIT       0x07  // controller → sender: deliver power limit
 
 // ====== Data schema ======
 typedef struct {
@@ -46,21 +46,11 @@ typedef struct {
     uint8_t  sender_mac[6];
 } __attribute__((packed)) register_packet_t;
 
-// ── [MODIFIED] welcome_packet_t — added timestamp field ────────
-// Original:
-// typedef struct {
-//     uint8_t  msg_type;
-//     uint8_t  assigned_id;
-// } __attribute__((packed)) welcome_packet_t;
-//
-// Changed: must match controller's struct — added sync_timestamp
-// so this sender can anchor real wall-clock time from the backend
 typedef struct {
     uint8_t  msg_type;
     uint8_t  assigned_id;
-    char     sync_timestamp[32];  // [ADDED] ISO UTC timestamp from controller
+    char     sync_timestamp[32];
 } __attribute__((packed)) welcome_packet_t;
-// ───────────────────────────────────────────────────────────────
 
 typedef struct {
     uint16_t counter;
@@ -82,6 +72,18 @@ typedef struct {
     uint16_t confirmed_floor;
 } __attribute__((packed)) ack_packet_t;
 
+// sender_mac: MAC of the sender requesting its power limit
+typedef struct {
+    uint8_t  msg_type;
+    uint8_t  sender_mac[6];
+} __attribute__((packed)) power_limit_req_packet_t;
+
+// power_limit_mw: limit in milliwatts, delivered by the controller
+typedef struct {
+    uint8_t  msg_type;
+    int32_t  power_limit_mw;
+} __attribute__((packed)) power_limit_packet_t;
+
 // ====== Sending buffer ======
 typedef struct {
     uint16_t counter;
@@ -93,6 +95,11 @@ typedef struct {
 static buffered_frame_t send_buffer[SENDER_BUFFER_SIZE];
 static uint16_t next_counter     = 0;
 static uint16_t confirmed_floor  = 0;
+
+// ====== Power limit state ======
+// -1 means not yet received from the controller
+static volatile int32_t power_threshold_mw = -1;
+static volatile bool    over_power_flag    = false;
 
 // ====== Status ======
 static uint8_t  my_mac[6];
@@ -108,20 +115,13 @@ static uint16_t disconnect_first_frame = 0;
 static uint8_t  consecutive_timeouts   = 0;
 #define DISCONNECT_THRESHOLD  3
 
-// ── [ADDED] time sync state ────────────────────────────────────
-// Anchors real wall-clock time to this sender's monotonic timer.
-// sync_timestamp: ISO string received from controller in WELCOME.
-// sync_boot_us:   esp_timer value at the moment WELCOME arrived.
-// Both recorded simultaneously so offset arithmetic is accurate.
-//
-// [OPTIMISED] sync_base_us precomputes (base_epoch * 1e6 + us)
-// once at sync time so compute_frame_timestamp never needs to
-// call strptime/mktime again — hot path is 3 integer ops only.
+// ====== Time sync state ======
+// sync_base_us precomputed once at WELCOME so the hot path in
+// compute_frame_timestamp never calls strptime/mktime again.
 static char    sync_timestamp[32] = {0};
 static int64_t sync_boot_us       = 0;
-static int64_t sync_base_us       = 0;  // [ADDED] precomputed epoch anchor
+static int64_t sync_base_us       = 0;
 static bool    time_synced        = false;
-// ───────────────────────────────────────────────────────────────
 
 // ====== ADC ======
 static adc_oneshot_unit_handle_t adc1_handle;
@@ -133,7 +133,6 @@ void sender_task(void *arg);
 void adc_task(void *arg);
 
 // ADC-Sender ring
-
 #define SAMPLE_RING_SIZE 500
 #define SAMPLE_PERIOD_MS 10
 
@@ -150,12 +149,20 @@ static SemaphoreHandle_t ring_mutex;
 
 
 /*---------------------------------------------------------------
-    [ADDED] Compute real ISO timestamp for a given frame.
-    frame_boot_us: the esp_timer value recorded when the frame
-    was sampled (i.e. f->time_100ms * 100000).
-    Uses sync_base_us (precomputed once at WELCOME time) plus
-    the offset from sync_boot_us — no string parsing on hot path.
-    Output written into `out` buffer of size `len`.
+    Power limit enforcement placeholder.
+    Called whenever a new power limit is received from the controller.
+    Replace this body with hardware-level enforcement (GPIO relay,
+    PWM cutback, etc.) when the hardware is ready.
+---------------------------------------------------------------*/
+static void on_power_limit_received(int32_t limit_mw) {
+    ESP_LOGI(TAG, "Power limit set to %ld mW — enforcement placeholder", limit_mw);
+    // TODO: implement hardware enforcement
+}
+
+/*---------------------------------------------------------------
+    Compute real ISO timestamp for a given frame.
+    frame_boot_us: the esp_timer value when the frame was sampled.
+    Hot path: 3 integer ops only (sync_base_us precomputed at WELCOME).
 ---------------------------------------------------------------*/
 static void compute_frame_timestamp(int64_t frame_boot_us,
                                     char *out, size_t len) {
@@ -164,7 +171,6 @@ static void compute_frame_timestamp(int64_t frame_boot_us,
         return;
     }
 
-    // [OPTIMISED] hot path: 3 integer ops, no strptime/mktime
     int64_t total_us  = sync_base_us + (frame_boot_us - sync_boot_us);
     time_t  final_sec = total_us / 1000000LL;
     int     final_us  = (int)(total_us % 1000000LL);
@@ -256,16 +262,7 @@ static uint8_t build_packet(adc_packet_t *pkt) {
         adc_frame_t *dst = &pkt->frames[pkt->frame_count++];
 
         dst->counter = f->counter;
-
-        // ── [MODIFIED] time_since_boot_ms now uses real timestamp ──
-        // Original:
-        // dst->time_since_boot_ms = f->counter * 100;
-        //
-        // Changed: compute the actual boot-relative microsecond value
-        // from f->time_100ms so compute_frame_timestamp can derive
-        // the correct absolute wall-clock time on the backend.
-        dst->time_since_boot_ms = (uint32_t)f->time_100ms * 100;  // [MODIFIED]
-        // ─────────────────────────────────────────────────────────
+        dst->time_since_boot_ms = (uint32_t)f->time_100ms * 100;
 
         uint16_t tmp_current[SAMPLES_PER_FRAME];
         uint16_t tmp_voltage[SAMPLES_PER_FRAME];
@@ -286,7 +283,7 @@ static uint8_t build_packet(adc_packet_t *pkt) {
     ESP-NOW callbacks
 ---------------------------------------------------------------*/
 
-static void on_data_sent(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) { 
+static void on_data_sent(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS) {
         waiting_ack = false;
         consecutive_timeouts++;
@@ -313,8 +310,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     if (len < 1) return;
     uint8_t msg_type = data[0];
 
-    ESP_LOGW(TAG, "RX msg=%d len=%d expected=%d",
-             msg_type, len, sizeof(welcome_packet_t));
+    ESP_LOGW(TAG, "RX msg=%d len=%d", msg_type, len);
 
     // ── HELLO: Controller broadcast, reply REGISTER ──
     if (msg_type == MSG_HELLO && len == sizeof(hello_packet_t)) {
@@ -339,21 +335,17 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         return;
     }
 
-    // ── WELCOME: save ID and start ADC sampling ──
+    // ── WELCOME: save ID, anchor time sync, start tasks, request power limit ──
     if (msg_type == MSG_WELCOME && len == sizeof(welcome_packet_t)) {
         const welcome_packet_t *welcome = (const welcome_packet_t *)data;
         my_id      = welcome->assigned_id;
         registered = true;
 
-        // ── [ADDED] record time sync anchor from WELCOME ────────
-        // Both values captured at the same instant so the offset
-        // arithmetic in compute_frame_timestamp stays accurate.
-        strncpy(sync_timestamp, welcome->sync_timestamp,
-                sizeof(sync_timestamp));
-        sync_boot_us = esp_timer_get_time();  // anchor monotonic clock
+        // Anchor real wall-clock time from the controller's timestamp
+        strncpy(sync_timestamp, welcome->sync_timestamp, sizeof(sync_timestamp));
+        sync_boot_us = esp_timer_get_time();
 
-        // [ADDED] precompute sync_base_us once here so the hot path
-        // in compute_frame_timestamp never calls strptime/mktime again
+        // Precompute sync_base_us so compute_frame_timestamp is cheap
         {
             char base_no_us[32];
             int us = 0;
@@ -373,12 +365,24 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         }
 
         time_synced = true;
-        // ────────────────────────────────────────────────────────
 
         ESP_LOGI(TAG, "Registered! Assigned ID = %d, sync time = %s",
-                 my_id, sync_timestamp); // [MODIFIED] log includes timestamp
-        xTaskCreate(adc_task,  "adc_task",  4096, NULL, 6, NULL);
+                 my_id, sync_timestamp);
+
+        xTaskCreate(adc_task,    "adc_task",    4096, NULL, 6, NULL);
         xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, NULL);
+
+        // Request the power limit for this sender from the controller.
+        // The controller will ask the backend and relay the response.
+        power_limit_req_packet_t plreq = {
+            .msg_type = MSG_POWER_LIMIT_REQ,
+        };
+        memcpy(plreq.sender_mac, my_mac, 6);
+        esp_now_send(controller_mac, (uint8_t *)&plreq, sizeof(plreq));
+        ESP_LOGI(TAG, "Sent POWER_LIMIT_REQ to controller for MAC "
+                 "%02X:%02X:%02X:%02X:%02X:%02X",
+                 my_mac[0], my_mac[1], my_mac[2],
+                 my_mac[3], my_mac[4], my_mac[5]);
         return;
     }
 
@@ -389,6 +393,15 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         buffer_clear_acked(ack->confirmed_floor);
         waiting_ack = false;
         ESP_LOGI(TAG, "ACK floor=%d", ack->confirmed_floor);
+        return;
+    }
+
+    // ── POWER_LIMIT: store and call enforcement placeholder ──
+    if (msg_type == MSG_POWER_LIMIT && len == sizeof(power_limit_packet_t)) {
+        const power_limit_packet_t *pl = (const power_limit_packet_t *)data;
+        power_threshold_mw = pl->power_limit_mw;
+        on_power_limit_received(power_threshold_mw);
+        ESP_LOGI(TAG, "Power limit received: %ld mW", power_threshold_mw);
         return;
     }
 }
@@ -456,12 +469,12 @@ static void wifi_init(void) {
     Sender Task (starts after receiving WELCOME)
 ---------------------------------------------------------------*/
 
-void adc_task (void *arg) {
+void adc_task(void *arg) {
     int64_t last_sample_time = 0;
 
     ESP_LOGI(TAG, "ADC task started as ECU%d", my_id);
 
-    while(1) {
+    while (1) {
         int64_t now = esp_timer_get_time() / 1000;
 
         // 100Hz sampling
@@ -475,17 +488,35 @@ void adc_task (void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
+            // Power threshold check — only active once limit has been received
+            if (power_threshold_mw > 0) {
+                int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
+                if (power_mw > power_threshold_mw) {
+                    if (!over_power_flag) {
+                        over_power_flag = true;
+                        ESP_LOGE(TAG,
+                                 "OVER POWER: %ld mW > threshold %ld mW "
+                                 "(V=%d mV, I=%d mV)",
+                                 power_mw, power_threshold_mw,
+                                 (int16_t)mv_v, (int16_t)mv_c);
+                    }
+                } else {
+                    if (over_power_flag) {
+                        over_power_flag = false;
+                        ESP_LOGI(TAG,
+                                 "Power back to normal: %ld mW <= threshold %ld mW",
+                                 power_mw, power_threshold_mw);
+                    }
+                }
+            }
+
             xSemaphoreTake(ring_mutex, portMAX_DELAY);
             uint16_t slot = ring_write % SAMPLE_RING_SIZE;
-            sample_ring[slot].current_mv   = (int16_t)(mv_c * GAIN);
-            sample_ring[slot].voltage_mv   = (int16_t)mv_v;
+            sample_ring[slot].current_mv = (int16_t)(mv_c * GAIN);
+            sample_ring[slot].voltage_mv = (int16_t)mv_v;
             sample_ring[slot].sampled_at = now;
             ring_write++;
             xSemaphoreGive(ring_mutex);
-
-            //current_buf[sample_index] = (int16_t)(mv_c * GAIN);
-            //voltage_buf[sample_index] = (int16_t)mv_v;
-            //sample_index++;
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
@@ -497,11 +528,9 @@ void sender_task(void *arg) {
     int     sample_index = 0;
     int64_t now = 0;
 
-
     ESP_LOGI(TAG, "Sender task started as ECU%d", my_id);
 
     while (1) {
-
         xSemaphoreTake(ring_mutex, portMAX_DELAY);
         while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
             uint16_t slot = ring_read % SAMPLE_RING_SIZE;
@@ -542,7 +571,6 @@ void sender_task(void *arg) {
                 memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
                 if (count > 0) {
-                    // ── [ADDED] log real timestamp of first frame ──
                     if (time_synced) {
                         char ts[32];
                         int64_t frame_us =
@@ -554,9 +582,7 @@ void sender_task(void *arg) {
                                  pkt.frames[count - 1].counter,
                                  ts);
                     }
-                    // ──────────────────────────────────────────────
-                    esp_now_send(controller_mac,
-                                 (uint8_t *)&pkt, sizeof(pkt));
+                    esp_now_send(controller_mac, (uint8_t *)&pkt, sizeof(pkt));
                     waiting_ack    = true;
                     last_send_time = now;
                 }
