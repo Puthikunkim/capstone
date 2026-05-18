@@ -48,7 +48,7 @@ def list_team_ecus(db: Session, team_id: int) -> list[ECU]:
     stmt = (
         select(ECU)
         .where(ECU.team_id == team_id)
-        .order_by(ECU.last_seen.desc().nullslast(), ECU.serial_number.asc())
+        .order_by(ECU.last_seen.desc().nullslast(), ECU.mac_address.asc().nullslast())
     )
     return list(db.scalars(stmt).all())
 
@@ -62,7 +62,7 @@ def list_unassigned_ecus(db: Session) -> list[ECU]:
     stmt = (
         select(ECU)
         .where(ECU.team_id.is_(None))
-        .order_by(ECU.last_seen.desc().nullslast(), ECU.serial_number.asc())
+        .order_by(ECU.last_seen.desc().nullslast(), ECU.mac_address.asc().nullslast())
     )
     return list(db.scalars(stmt).all())
 

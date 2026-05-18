@@ -6,9 +6,9 @@ from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.power_violation_event import PowerViolationEvent
 
 
-def make_ecu(db, serial_number=1001):
+def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01"):
     ecu = ECU(
-        serial_number=serial_number,
+        mac_address=mac_address,
         team_number=1,
         vehicle_class=VehicleClass.STANDARD,
         vehicle_type=VehicleType.BIKE,
@@ -53,8 +53,8 @@ class TestListViolations:
         assert len(resp.json()) == 1
 
     def test_filters_by_ecu_id(self, client, db):
-        ecu1 = make_ecu(db, serial_number=1001)
-        ecu2 = make_ecu(db, serial_number=1002)
+        ecu1 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
+        ecu2 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
         make_violation(db, ecu1.id)
         make_violation(db, ecu2.id)
         events = client.get(f"/api/violations/?ecu_id={ecu1.id}").json()

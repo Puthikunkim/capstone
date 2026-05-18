@@ -6,9 +6,9 @@ from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.energy_frame import EnergyFrame
 
 
-def make_ecu(db, serial_number=1001, team_number=1, power_limit_watts=350.0):
+def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01", team_number=1, power_limit_watts=350.0):
     ecu = ECU(
-        serial_number=serial_number,
+        mac_address=mac_address,
         team_number=team_number,
         vehicle_class=VehicleClass.STANDARD,
         vehicle_type=VehicleType.BIKE,
@@ -42,16 +42,16 @@ class TestListEcus:
         assert resp.json() == []
 
     def test_returns_all_ecus(self, client, db):
-        make_ecu(db, serial_number=1001)
-        make_ecu(db, serial_number=1002)
+        make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
+        make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
         resp = client.get("/api/ecu/")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
     def test_response_contains_expected_fields(self, client, db):
-        make_ecu(db, serial_number=9999)
+        make_ecu(db, mac_address="AA:BB:CC:DD:EE:09")
         ecu = client.get("/api/ecu/").json()[0]
-        assert ecu["serial_number"] == "9999"
+        assert ecu["mac_address"] == "AA:BB:CC:DD:EE:09"
         assert "id" in ecu
         assert "is_connected" in ecu
 
@@ -63,10 +63,10 @@ class TestGetEcu:
         assert resp.status_code == 200
         assert resp.json()["id"] == ecu.id
 
-    def test_returns_correct_serial_number(self, client, db):
-        ecu = make_ecu(db, serial_number=5555)
+    def test_returns_correct_mac_address(self, client, db):
+        ecu = make_ecu(db, mac_address="AA:BB:CC:DD:EE:05")
         resp = client.get(f"/api/ecu/{ecu.id}")
-        assert resp.json()["serial_number"] == "5555"
+        assert resp.json()["mac_address"] == "AA:BB:CC:DD:EE:05"
 
     def test_returns_404_when_not_found(self, client):
         resp = client.get("/api/ecu/9999")
@@ -80,11 +80,11 @@ class TestConfigureEcu:
         assert resp.status_code == 200
         assert resp.json()["team_number"] == 42
 
-    def test_power_limit_cannot_be_changed_via_configure(self, client, db):
+    def test_power_limit_can_be_changed_via_configure(self, client, db):
         ecu = make_ecu(db, power_limit_watts=350.0)
         resp = client.post(f"/api/ecu/{ecu.id}/configure", json={"power_limit_watts": 2000.0})
         assert resp.status_code == 200
-        assert resp.json()["power_limit_watts"] == 350.0
+        assert resp.json()["power_limit_watts"] == 2000.0
 
     def test_updates_vehicle_class(self, client, db):
         ecu = make_ecu(db)
@@ -147,8 +147,8 @@ class TestGetEcuHistory:
         assert timestamps == sorted(timestamps)
 
     def test_does_not_return_frames_from_other_ecus(self, client, db):
-        ecu1 = make_ecu(db, serial_number=1001)
-        ecu2 = make_ecu(db, serial_number=1002)
+        ecu1 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
+        ecu2 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
         make_frame(db, ecu2.id)
         resp = client.get(f"/api/ecu/{ecu1.id}/history")
         assert resp.json() == []

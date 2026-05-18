@@ -9,9 +9,9 @@ MAGIC_BYTE = bytes([0xE9])
 VALID_BIN = MAGIC_BYTE + b"\x00" * 100
 
 
-def make_ecu(db, serial_number=1001):
+def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01"):
     ecu = ECU(
-        serial_number=serial_number,
+        mac_address=mac_address,
         team_number=1,
         vehicle_class=VehicleClass.STANDARD,
         vehicle_type=VehicleType.BIKE,

@@ -76,7 +76,12 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 
 	if "vehicle_class" in updates and updates["vehicle_class"] is not None:
 		ecu.vehicle_class = _coerce_vehicle_class(updates["vehicle_class"]) or ecu.vehicle_class
-		ecu.power_limit_watts = _default_power_limit(ecu.vehicle_class)
+		# Only apply the class default when no explicit power_limit_watts is provided
+		if "power_limit_watts" not in updates or updates["power_limit_watts"] is None:
+			ecu.power_limit_watts = _default_power_limit(ecu.vehicle_class)
+
+	if "power_limit_watts" in updates and updates["power_limit_watts"] is not None:
+		ecu.power_limit_watts = float(updates["power_limit_watts"])
 
 	if "vehicle_type" in updates and updates["vehicle_type"] is not None:
 		ecu.vehicle_type = _coerce_vehicle_type(updates["vehicle_type"]) or ecu.vehicle_type
@@ -100,12 +105,12 @@ def _apply_ecu_updates(ecu: ECU, updates: Mapping[str, Any]) -> ECU:
 
 	return ecu
 
-# Retrieves an existing ECU by serial number or creates a new one if it doesn't exist. 
-# This is used when processing incoming frames to ensure we have an ECU record to associate 
+# Retrieves an existing ECU by MAC address or creates a new one if it doesn't exist.
+# This is used when processing incoming frames to ensure we have an ECU record to associate
 # with the frame and any potential alerts.
-def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) -> ECU:
-	serial_number = str(frame_payload["ecu_serial"])
-	ecu = db.scalar(select(ECU).where(ECU.serial_number == serial_number))
+def _get_or_create_ecu_by_mac(db: Session, frame_payload: Mapping[str, Any]) -> ECU:
+	mac = str(frame_payload["mac_address"])
+	ecu = db.scalar(select(ECU).where(ECU.mac_address == mac))
 	if ecu is not None:
 		return ecu
 
@@ -114,7 +119,7 @@ def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) 
 	power_limit = frame_payload.get("power_limit_watts")
 
 	ecu = ECU(
-		serial_number=serial_number,
+		mac_address=mac,
 		team_number=int(frame_payload.get("team_number", 0)),
 		vehicle_class=vehicle_class,
 		vehicle_type=vehicle_type,
@@ -126,7 +131,7 @@ def _get_or_create_ecu_by_serial(db: Session, frame_payload: Mapping[str, Any]) 
 
 def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 	payload = _to_dict(frame_data)
-	ecu = _get_or_create_ecu_by_serial(db, payload)
+	ecu = _get_or_create_ecu_by_mac(db, payload)
 	_apply_ecu_updates(
 		ecu,
 		{
@@ -220,7 +225,7 @@ def get_ecu(db: Session, ecu_id: int) -> ECU | None:
 
 # Function to list all ECUs, ordered by last seen time (most recent first) and then by serial number. This is used by the frontend to display the list of connected ECUs.
 def list_ecus(db: Session) -> list[ECU]:
-	stmt = select(ECU).order_by(ECU.last_seen.desc().nullslast(), ECU.serial_number.asc())
+	stmt = select(ECU).order_by(ECU.last_seen.desc().nullslast(), ECU.mac_address.asc().nullslast())
 	return list(db.scalars(stmt).all())
 
 # Function to update ECU configuration based on provided updates. This is used by the frontend when an admin wants to change ECU settings like team number, vehicle class/type, or power limits.

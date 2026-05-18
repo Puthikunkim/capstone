@@ -11,9 +11,9 @@ SHORT_START = "2024-01-01T12:00:00Z"
 SHORT_END = "2024-01-01T12:00:20Z"
 
 
-def make_ecu(db, serial_number=1001, vehicle_class=VehicleClass.STANDARD, vehicle_type=VehicleType.BIKE):
+def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01", vehicle_class=VehicleClass.STANDARD, vehicle_type=VehicleType.BIKE):
     ecu = ECU(
-        serial_number=serial_number,
+        mac_address=mac_address,
         team_number=1,
         vehicle_class=vehicle_class,
         vehicle_type=vehicle_type,
@@ -85,24 +85,24 @@ class TestGetEventScoring:
             assert field in entry
 
     def test_two_ecus_in_same_bracket(self, client, db):
-        ecu1 = make_ecu(db, serial_number=1001)
-        ecu2 = make_ecu(db, serial_number=1002)
+        ecu1 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
+        ecu2 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
         make_frame(db, ecu1.id, "2024-01-01T12:30:00+00:00", power_watts=100.0)
         make_frame(db, ecu2.id, "2024-01-01T12:30:00+00:00", power_watts=200.0)
         resp = client.get(f"/api/scoring/event/evt1?start={START}&end={END}")
         assert len(resp.json()["brackets"][0]["entries"]) == 2
 
     def test_ecus_split_into_different_brackets_by_class(self, client, db):
-        ecu_std = make_ecu(db, serial_number=1001, vehicle_class=VehicleClass.STANDARD)
-        ecu_open = make_ecu(db, serial_number=1002, vehicle_class=VehicleClass.OPEN)
+        ecu_std = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01", vehicle_class=VehicleClass.STANDARD)
+        ecu_open = make_ecu(db, mac_address="AA:BB:CC:DD:EE:02", vehicle_class=VehicleClass.OPEN)
         make_frame(db, ecu_std.id, "2024-01-01T12:30:00+00:00")
         make_frame(db, ecu_open.id, "2024-01-01T12:30:00+00:00")
         resp = client.get(f"/api/scoring/event/evt1?start={START}&end={END}")
         assert len(resp.json()["brackets"]) == 2
 
     def test_lower_energy_ranks_first(self, client, db):
-        ecu1 = make_ecu(db, serial_number=1001)
-        ecu2 = make_ecu(db, serial_number=1002)
+        ecu1 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
+        ecu2 = make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
         make_frame(db, ecu1.id, "2024-01-01T12:30:00+00:00", energy=0.5)
         make_frame(db, ecu2.id, "2024-01-01T12:30:01+00:00", energy=1.0)
         entries = client.get(f"/api/scoring/event/evt1?start={START}&end={END}").json()["brackets"][0]["entries"]

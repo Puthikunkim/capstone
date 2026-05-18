@@ -4,9 +4,9 @@ from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.team import Team
 
 
-def make_ecu(db, serial_number=1001):
+def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01"):
     ecu = ECU(
-        serial_number=serial_number,
+        mac_address=mac_address,
         team_number=0,
         vehicle_class=VehicleClass.STANDARD,
         vehicle_type=VehicleType.BIKE,
@@ -145,23 +145,23 @@ class TestListTeamEcus:
 
 class TestListAvailableEcus:
     def test_returns_unassigned_ecus(self, client, db):
-        make_ecu(db, serial_number=1001)
+        make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
         resp = client.get("/api/teams/available-ecus")
         assert resp.status_code == 200
         assert len(resp.json()) == 1
 
     def test_excludes_assigned_ecus(self, client, db):
         team = make_team(db)
-        assigned = make_ecu(db, serial_number=1001)
+        assigned = make_ecu(db, mac_address="AA:BB:CC:DD:EE:01")
         assigned.team_id = team.id
         db.commit()
-        make_ecu(db, serial_number=1002)
+        make_ecu(db, mac_address="AA:BB:CC:DD:EE:02")
 
         resp = client.get("/api/teams/available-ecus")
         assert resp.status_code == 200
-        serials = [e["serial_number"] for e in resp.json()]
-        assert "1002" in serials
-        assert "1001" not in serials
+        macs = [e["mac_address"] for e in resp.json()]
+        assert "AA:BB:CC:DD:EE:02" in macs
+        assert "AA:BB:CC:DD:EE:01" not in macs
 
     def test_returns_empty_list_when_all_assigned(self, client, db):
         team = make_team(db)

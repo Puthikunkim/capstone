@@ -12,7 +12,6 @@ from app.models.ecu import VehicleClass, VehicleType
 
 
 class ECUBase(BaseModel):
-    serial_number: str
     team_number: int
     vehicle_class: VehicleClass
     vehicle_type: VehicleType
@@ -29,10 +28,12 @@ class ECUConfigure(BaseModel):
     vehicle_class: VehicleClass | None = None
     vehicle_type: VehicleType | None = None
     firmware_version: str | None = None
+    power_limit_watts: float | None = None
 
 
 class ECUResponse(ECUBase):
     id: int
+    mac_address: str | None
     team_id: int | None
     last_seen: datetime | None
     temperature: float | None
