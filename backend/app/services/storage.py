@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import Select, select
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.alert import Alert
 from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.energy_frame import EnergyFrame
+from app.models.event_participant import EventParticipant
 
 # Function to convert various input types to a standard dictionary format for easier processing.
 def _to_dict(payload: Any) -> dict[str, Any]:
@@ -160,6 +161,7 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 
 	frame = EnergyFrame(
 		ecu_id=ecu.id,
+		team_id=ecu.team_id,
 		timestamp=frame_timestamp,
 		avg_voltage=float(payload["avg_voltage"]),
 		avg_current=float(payload["avg_current"]),
@@ -277,3 +279,35 @@ def get_alerts(
 # Function to retrieve a specific alert by its ID. This is used by the frontend when viewing details of a specific alert.
 def get_alert(db: Session, alert_id: int) -> Alert | None:
 	return db.get(Alert, alert_id)
+
+
+def get_frames_for_team(
+	db: Session,
+	team_id: int,
+	event_id: int | None = None,
+	limit: int | None = 100,
+) -> list[EnergyFrame]:
+	stmt: Select[tuple[EnergyFrame]] = (
+		select(EnergyFrame)
+		.where(EnergyFrame.team_id == team_id)
+		.order_by(EnergyFrame.timestamp.asc())
+	)
+
+	if event_id is not None:
+		participant = db.scalar(
+			select(EventParticipant).where(
+				EventParticipant.team_id == team_id,
+				EventParticipant.event_id == event_id,
+			)
+		)
+		if participant is not None and participant.start is not None and participant.duration_seconds is not None:
+			end = participant.start + timedelta(seconds=participant.duration_seconds)
+			stmt = stmt.where(
+				EnergyFrame.timestamp >= _to_utc(participant.start),
+				EnergyFrame.timestamp <= _to_utc(end),
+			)
+
+	if limit is not None:
+		stmt = stmt.limit(max(0, limit))
+
+	return list(db.scalars(stmt).all())

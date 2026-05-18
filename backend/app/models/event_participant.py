@@ -18,8 +18,8 @@ class EventParticipant(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), nullable=False, index=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("competition_events.id", ondelete="CASCADE"), nullable=False, index=True)
-    start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     team = relationship("Team", back_populates="event_participations")
     event = relationship("CompetitionEvent", back_populates="participants")

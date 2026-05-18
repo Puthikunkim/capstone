@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, computed_field
 class EventParticipantCreate(BaseModel):
     team_id: int
     event_id: int
-    start: datetime
-    duration_seconds: float = Field(ge=0)
+    start: datetime | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
 
 
 class EventParticipantUpdate(BaseModel):
@@ -21,12 +21,14 @@ class EventParticipantResponse(BaseModel):
     id: int
     team_id: int
     event_id: int
-    start: datetime
-    duration_seconds: float
+    start: datetime | None
+    duration_seconds: float | None
 
     @computed_field
     @property
-    def end(self) -> datetime:
+    def end(self) -> datetime | None:
+        if self.start is None or self.duration_seconds is None:
+            return None
         return self.start + timedelta(seconds=self.duration_seconds)
 
     model_config = {"from_attributes": True}

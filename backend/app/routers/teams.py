@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.ecu import ECUResponse
 from app.schemas.team import TeamCreate, TeamDetailResponse, TeamResponse
-from app.services.storage import get_ecu
+from app.schemas.energy_frame import EnergyFrameResponse
+from app.services.storage import get_ecu, get_frames_for_team
 from app.services.teams import (
     ECUAssignmentConflictError,
     TeamNameConflictError,
@@ -20,6 +21,8 @@ from app.services.teams import (
 )
 
 router = APIRouter(prefix="/teams", tags=["teams"])
+
+_TEAM_NOT_FOUND = "Team not found"
 
 
 @router.post("/", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
@@ -44,7 +47,7 @@ def list_available_ecus(db: Session = Depends(get_db)):
 def get_team_entry(team_id: int, db: Session = Depends(get_db)):
     team = get_team(db, team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
 
     assigned_ecus = list_team_ecus(db, team_id)
     return TeamDetailResponse(
@@ -60,15 +63,28 @@ def get_team_entry(team_id: int, db: Session = Depends(get_db)):
 def list_ecus_for_team(team_id: int, db: Session = Depends(get_db)):
     team = get_team(db, team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
     return list_team_ecus(db, team_id)
+
+
+@router.get("/{team_id}/frames", response_model=list[EnergyFrameResponse])
+def get_team_frames(
+    team_id: int,
+    event_id: int | None = None,
+    limit: int | None = 100,
+    db: Session = Depends(get_db),
+):
+    team = get_team(db, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
+    return get_frames_for_team(db, team_id, event_id=event_id, limit=limit)
 
 
 @router.post("/{team_id}/assign/{ecu_id}", response_model=ECUResponse)
 def assign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
     team = get_team(db, team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
 
     ecu = get_ecu(db, ecu_id)
     if ecu is None:
@@ -84,7 +100,7 @@ def assign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
 def unassign_ecu(team_id: int, ecu_id: int, db: Session = Depends(get_db)):
     team = get_team(db, team_id)
     if team is None:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
 
     ecu = get_ecu(db, ecu_id)
     if ecu is None:

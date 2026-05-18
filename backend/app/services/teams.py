@@ -3,7 +3,9 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.competition import CompetitionEvent
 from app.models.ecu import ECU
+from app.models.event_participant import EventParticipant
 from app.models.team import Team
 from app.schemas.team import TeamCreate
 
@@ -30,9 +32,29 @@ def create_team(db: Session, payload: TeamCreate) -> Team:
         vehicle_type=payload.vehicle_type,
     )
     db.add(team)
+    db.flush()
+
+    if payload.competition_id is not None:
+        _enroll_team_in_competition_events(db, team, payload.competition_id)
+
     db.commit()
     db.refresh(team)
     return team
+
+
+def _enroll_team_in_competition_events(db: Session, team: Team, competition_id: int) -> None:
+    events = db.scalars(
+        select(CompetitionEvent).where(CompetitionEvent.competition_id == competition_id)
+    ).all()
+    for event in events:
+        already_enrolled = db.scalar(
+            select(EventParticipant).where(
+                EventParticipant.team_id == team.id,
+                EventParticipant.event_id == event.id,
+            )
+        )
+        if already_enrolled is None:
+            db.add(EventParticipant(team_id=team.id, event_id=event.id))
 
 
 def list_teams(db: Session) -> list[Team]:
