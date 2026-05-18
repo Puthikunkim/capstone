@@ -141,7 +141,7 @@ def parse_packet(line: str) -> dict | None:
     for f in frames_raw:
         frames.append({
             "counter":    f.get("counter", 0),
-            "tx_time_ms": str(f.get("tx_time_ms", "")),
+            "tx_time_ms": f.get("tx_time_ms", ""),
             "current":    f.get("current", []),
             "voltage":    f.get("voltage", []),
         })
@@ -165,7 +165,7 @@ async def process_frames(queue: asyncio.Queue) -> None:
 
             try:
                 timestamp = datetime.fromisoformat(frame["tx_time_ms"])
-            except (KeyError, ValueError):
+            except (KeyError, ValueError, TypeError):
                 logger.warning(
                     "Bad timestamp %r on MAC %s counter=%d, using server time",
                     frame.get("tx_time_ms"), mac_address, frame["counter"],
