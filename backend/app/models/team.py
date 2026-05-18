@@ -29,4 +29,6 @@ class Team(Base):
     )
 
     ecus = relationship("ECU", back_populates="team")
+    energy_frames = relationship("EnergyFrame", back_populates="team")
+    event_participations = relationship("EventParticipant", back_populates="team")
     competition = relationship("Competition", back_populates="teams")

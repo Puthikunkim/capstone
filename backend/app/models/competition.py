@@ -51,3 +51,4 @@ class CompetitionEvent(Base):
     )
 
     competition = relationship("Competition", back_populates="events")
+    participants = relationship("EventParticipant", back_populates="event", cascade="all, delete-orphan", passive_deletes=True)

@@ -18,6 +18,7 @@ class EnergyFrame(Base):
 
 	id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 	ecu_id: Mapped[int] = mapped_column(ForeignKey("ecus.id", ondelete="CASCADE"), nullable=False, index=True) # Searching frames by ECU should be common, so indexed
+	team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), nullable=True, index=True)
 	timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 	avg_voltage: Mapped[float] = mapped_column(Float, nullable=False) # Might need to be changed to an array of values
 	avg_current: Mapped[float] = mapped_column(Float, nullable=False) # Might need to be changed to an array of values
@@ -25,4 +26,5 @@ class EnergyFrame(Base):
 	energy: Mapped[float] = mapped_column(Float, nullable=False) # Might need to be changed to an array of values
 
 	ecu = relationship("ECU", back_populates="energy_frames") # An energy frame belongs to an ECU, this field doesn't exist in the db
+	team = relationship("Team", back_populates="energy_frames")
 	alerts = relationship("Alert", back_populates="frame") # An energy frame can trigger many alerts
