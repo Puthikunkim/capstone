@@ -21,13 +21,17 @@ from serial_reader import run as serial_run
 
 logger = logging.getLogger(__name__)
 
+_background_tasks: set = set()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database ready")
     if settings.SERIAL_PORT:
-        serial_task = asyncio.create_task(serial_run(settings.SERIAL_PORT, settings.SERIAL_BAUD))
+        task = asyncio.create_task(serial_run(settings.SERIAL_PORT, settings.SERIAL_BAUD))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         logger.info("Serial reader started on %s at %d baud", settings.SERIAL_PORT, settings.SERIAL_BAUD)
     else:
         logger.info("No SERIAL_PORT configured — serial reader disabled")
