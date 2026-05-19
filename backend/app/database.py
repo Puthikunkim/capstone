@@ -50,7 +50,6 @@ def init_db() -> None:
 	Importing models here ensures SQLAlchemy registers metadata before create_all.
 	"""
 	from app.models import (  # noqa: F401
-		Alert,
 		Competition,
 		CompetitionEvent,
 		ECU,

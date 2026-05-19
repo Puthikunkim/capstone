@@ -24,8 +24,6 @@ def make_frame(db, ecu_id, timestamp_str="2024-01-01T12:00:00+00:00"):
     frame = EnergyFrame(
         ecu_id=ecu_id,
         timestamp=datetime.fromisoformat(timestamp_str),
-        avg_voltage=41.0,
-        avg_current=-3.0,
         power_watts=-123.0,
         energy=-3.0,
     )

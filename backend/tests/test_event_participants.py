@@ -73,8 +73,6 @@ def make_frame(db, ecu_id, team_id=None, timestamp_str="2024-01-01T12:00:00+00:0
         ecu_id=ecu_id,
         team_id=team_id,
         timestamp=datetime.fromisoformat(timestamp_str),
-        avg_voltage=41.0,
-        avg_current=3.0,
         power_watts=123.0,
         energy=1.0,
     )
@@ -469,8 +467,6 @@ class TestSaveFrameTeamId:
         frame, created = save_frame(db, {
             "mac_address": ecu.mac_address,
             "timestamp": datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc),
-            "avg_voltage": 40.0,
-            "avg_current": 2.0,
         })
 
         assert created is True
@@ -484,8 +480,6 @@ class TestSaveFrameTeamId:
         frame, created = save_frame(db, {
             "mac_address": ecu.mac_address,
             "timestamp": datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc),
-            "avg_voltage": 40.0,
-            "avg_current": 2.0,
         })
 
         assert created is True

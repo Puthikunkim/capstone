@@ -1,7 +1,3 @@
-# This module contains the core logic for managing ECUs, energy frames, 
-# and alerts in the application. It provides functions to save incoming 
-# data frames, check for alert conditions, and retrieve stored data for 
-# analysis and display. 
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -11,7 +7,6 @@ from typing import Any
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
-from app.models.alert import Alert
 from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.energy_frame import EnergyFrame
 from app.models.event_participant import EventParticipant
@@ -164,8 +159,6 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 		ecu_id=ecu.id,
 		team_id=ecu.team_id,
 		timestamp=frame_timestamp,
-		avg_voltage=0.0,
-		avg_current=0.0,
 		voltage_samples=payload.get("voltage_samples"),
 		current_samples=payload.get("current_samples"),
 		power_samples=power_samples or None,
@@ -176,33 +169,6 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 	db.commit()
 	db.refresh(frame)
 	return frame, True
-
-# Checks if the given energy frame breaches the power limit of its associated ECU and records an alert if necessary.
-def check_and_record_alert(db: Session, frame: EnergyFrame, ecu: ECU | None = None) -> Alert | None:
-	attached_ecu = ecu if ecu is not None else db.get(ECU, frame.ecu_id)
-	if attached_ecu is None:
-		return None
-
-	power_watts = float(frame.power_watts)
-	if power_watts <= float(attached_ecu.power_limit_watts):
-		return None
-
-	# Before creating a new alert, check if an alert for this frame already exists to prevent duplicates, which could happen if the same frame is processed multiple times due to network issues or retries.
-	existing_alert = db.scalar(select(Alert).where(Alert.frame_id == frame.id))
-	if existing_alert is not None:
-		return existing_alert
-
-	alert = Alert(
-		ecu_id=attached_ecu.id,
-		timestamp=_to_utc(frame.timestamp) or datetime.now(timezone.utc),
-		power_watts=power_watts,
-		limit_watts=float(attached_ecu.power_limit_watts),
-		frame_id=frame.id,
-	)
-	db.add(alert)
-	db.commit()
-	db.refresh(alert)
-	return alert
 
 # Function to retrieve energy frames for a given ECU, with optional filtering by time range and limit on number of results. This is used by the frontend to display historical data.
 def get_frames(
@@ -256,34 +222,6 @@ def set_ecu_firmware_version(db: Session, ecu_id: int, firmware_version: str) ->
 	db.commit()
 	db.refresh(ecu)
 	return ecu
-
-# Function to retrieve alerts, with optional filtering by ECU and time range, and limit on number of results. This is used by the frontend to display alert history.
-def get_alerts(
-	db: Session,
-	ecu_id: int | None = None,
-	start: datetime | None = None,
-	end: datetime | None = None,
-	limit: int | None = 100,
-) -> list[Alert]:
-	stmt: Select[tuple[Alert]] = select(Alert)
-
-	if ecu_id is not None:
-		stmt = stmt.where(Alert.ecu_id == ecu_id)
-	if start is not None:
-		stmt = stmt.where(Alert.timestamp >= _to_utc(start))
-	if end is not None:
-		stmt = stmt.where(Alert.timestamp <= _to_utc(end))
-
-	stmt = stmt.order_by(Alert.timestamp.desc())
-	if limit is not None:
-		stmt = stmt.limit(max(0, limit))
-
-	return list(db.scalars(stmt).all())
-
-# Function to retrieve a specific alert by its ID. This is used by the frontend when viewing details of a specific alert.
-def get_alert(db: Session, alert_id: int) -> Alert | None:
-	return db.get(Alert, alert_id)
-
 
 class TeamNotEnrolledInEventError(ValueError):
 	pass

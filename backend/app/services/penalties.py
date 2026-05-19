@@ -84,6 +84,7 @@ def track_power_violation(
 				peak_power_watts=power_watts,
 				frame_count=1,
 				is_warning=True,
+				trigger_frame_id=frame.id,
 			)
 			db.add(event)
 			db.commit()

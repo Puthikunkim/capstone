@@ -11,7 +11,7 @@ from app.models.energy_frame import EnergyFrame
 from app.schemas.energy_frame import EnergyFrameResponse
 from app.services.broadcast import manager
 from app.services.penalties import track_power_violation
-from app.services.storage import check_and_record_alert, save_frame
+from app.services.storage import save_frame
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,6 @@ async def persist_and_broadcast_frame(db: Session, processed: dict[str, Any]) ->
         return frame, False
 
     violation_update = track_power_violation(db, frame, ecu=None)
-    alert = None
-    if violation_update.transition == "started":
-        alert = check_and_record_alert(db, frame, ecu=None)
 
     if violation_update.event is not None and violation_update.transition in {"started", "ended"}:
         await manager.notify_violation_event(violation_update.event, violation_update.transition)
@@ -36,8 +33,5 @@ async def persist_and_broadcast_frame(db: Session, processed: dict[str, Any]) ->
         channel,
         EnergyFrameResponse.model_validate(frame).model_dump(mode="json"),
     )
-
-    if alert:
-        await manager.notify_alert(alert)
 
     return frame, True
