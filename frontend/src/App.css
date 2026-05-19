@@ -965,6 +965,39 @@ body {
 .assign-ecu-empty p { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .assign-ecu-empty span { font-size: 12px; }
 
+/* ── Sidebar event items ─────────────────────────────────────────── */
+.sidebar-event-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg-input);
+  transition: border-color 0.12s, background 0.12s;
+}
+.sidebar-event-item:hover { border-color: var(--border-light); background: var(--bg-card); }
+.sidebar-event-icon { color: var(--text-secondary); flex-shrink: 0; }
+.sidebar-event-label { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+
+.sidebar-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 0;
+  letter-spacing: 0.02em;
+}
+.sidebar-back-btn:hover { color: var(--accent); }
+
 /* ── Sidebar team cards ──────────────────────────────────────────── */
 .sidebar-team-card {
   border-radius: var(--radius-sm);
@@ -1006,6 +1039,182 @@ body {
   font-style: italic;
 }
 
+
+/* ── Event timing card (Dashboard) ──────────────────────────────── */
+.event-timing-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.event-timing-inputs {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.event-timing-inputs .form-field:last-child {
+  width: 140px;
+}
+
+.event-timing-progress {
+  display: flex; align-items: center; gap: 12px;
+}
+
+.event-timing-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.event-timing-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 1s linear;
+}
+
+.event-timing-label {
+  font-size: 12px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+  color: var(--text-secondary);
+}
+.event-timing-label.active  { color: var(--accent); }
+.event-timing-label.ended   { color: var(--text-muted); }
+.event-timing-label.upcoming { color: var(--orange); }
+
+.event-status-badge {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 9px; border-radius: 20px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.event-status-badge.active   { color: var(--accent);  background: var(--accent-dim);  border-color: var(--accent-glow); }
+.event-status-badge.upcoming { color: var(--orange);  background: var(--yellow-dim);  border-color: rgba(245,158,11,0.3); }
+.event-status-badge.ended    { color: var(--text-muted); background: var(--gray-dim); }
+
+/* ── Teams section (CompetitionsPage) ───────────────────────────── */
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 48px 0 40px;
+}
+
+.teams-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.teams-section-header h2 {
+  font-size: 22px; font-weight: 700; color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.teams-section-header p { font-size: 13px; color: var(--text-secondary); }
+
+.teams-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.team-global-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+
+.team-global-name {
+  font-size: 14px; font-weight: 700; color: var(--text-primary);
+}
+.team-global-meta {
+  font-size: 12px; color: var(--text-secondary);
+}
+.team-global-comp {
+  font-size: 11px; font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 20px;
+  padding: 2px 9px;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.team-global-comp.unassigned {
+  color: var(--text-muted);
+  background: var(--gray-dim);
+  border-color: var(--border);
+}
+
+.teams-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 48px 20px; text-align: center; color: var(--text-muted);
+}
+.teams-empty p { font-size: 15px; color: var(--text-secondary); }
+.teams-empty span { font-size: 13px; }
+
+/* ── Add-team list (AddTeamToCompetitionModal + detail modal) ─────── */
+.add-team-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+
+.add-team-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.add-team-info {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.add-team-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.add-team-meta { font-size: 11px; color: var(--text-muted); }
+
+.add-team-btn {
+  padding: 5px 12px !important;
+  font-size: 12px !important;
+  flex-shrink: 0;
+}
+
+.add-team-footer {
+  justify-content: space-between !important;
+}
+
+/* ── Competition detail: teams header with add button ─────────────── */
+.comp-detail-teams-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 2px;
+}
+.comp-detail-teams-header label { margin-bottom: 0; }
+
+.comp-detail-add-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px; font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.comp-detail-add-btn:hover { color: var(--accent); border-color: var(--accent-glow); }
+
+.comp-detail-add-section {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 1100px) {

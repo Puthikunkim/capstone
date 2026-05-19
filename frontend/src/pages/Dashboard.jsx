@@ -84,6 +84,134 @@ AlertItem.propTypes = {
   violation: PropTypes.object.isRequired,
 };
 
+// ── Event timing card ────────────────────────────────────────────────
+
+function toLocalInput(utcIso) {
+  if (!utcIso) return "";
+  const d = new Date(utcIso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function EventTimingCard({ participant, onSave }) {
+  const [startInput, setStartInput] = useState("");
+  const [durationMin, setDurationMin] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    setStartInput(participant?.start ? toLocalInput(participant.start) : "");
+    setDurationMin(participant?.duration_seconds != null ? String(participant.duration_seconds / 60) : "");
+  }, [participant]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleSave = async () => {
+    if (!participant || !onSave) return;
+    setSaving(true);
+    try {
+      await onSave({
+        start: startInput ? new Date(startInput).toISOString() : null,
+        duration_seconds: durationMin ? Number(durationMin) * 60 : null,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const start = startInput ? new Date(startInput) : null;
+  const durationMs = durationMin ? Number(durationMin) * 60000 : null;
+  const end = start && durationMs ? new Date(start.getTime() + durationMs) : null;
+
+  let status = null;
+  let progress = 0;
+  let timeDisplay = null;
+
+  if (start && end) {
+    if (now < start) {
+      const diff = Math.round((start - now) / 1000);
+      const m = Math.floor(diff / 60);
+      const s = diff % 60;
+      timeDisplay = `Starts in ${m}:${String(s).padStart(2, "0")}`;
+      status = "upcoming";
+    } else if (now <= end) {
+      const elapsed = (now - start) / 1000;
+      const total = Number(durationMin) * 60;
+      const remaining = Math.round(total - elapsed);
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      timeDisplay = `${m}:${String(s).padStart(2, "0")} remaining`;
+      status = "active";
+      progress = Math.min(100, (elapsed / total) * 100);
+    } else {
+      timeDisplay = "Event ended";
+      status = "ended";
+      progress = 100;
+    }
+  }
+
+  return (
+    <div className="event-timing-card">
+      <div className="card-header">
+        <span className="card-title">Event Timing</span>
+        {status && (
+          <span className={`event-status-badge ${status}`}>
+            {status === "active" ? "In Progress" : status === "upcoming" ? "Upcoming" : "Ended"}
+          </span>
+        )}
+      </div>
+      <div className="event-timing-inputs">
+        <div className="form-field">
+          <label>Start Time</label>
+          <input
+            type="datetime-local"
+            className="form-input"
+            value={startInput}
+            disabled={!participant}
+            onChange={(e) => setStartInput(e.target.value)}
+          />
+        </div>
+        <div className="form-field">
+          <label>Duration (min)</label>
+          <input
+            type="number"
+            className="form-input"
+            value={durationMin}
+            min="1"
+            placeholder="e.g. 30"
+            disabled={!participant}
+            onChange={(e) => setDurationMin(e.target.value)}
+          />
+        </div>
+      </div>
+      {start && end && (
+        <div className="event-timing-progress">
+          <div className="event-timing-bar">
+            <div className="event-timing-fill" style={{ width: `${progress}%` }} />
+          </div>
+          <span className={`event-timing-label ${status}`}>{timeDisplay}</span>
+        </div>
+      )}
+      <button
+        className="btn-primary"
+        style={{ marginTop: "10px", alignSelf: "flex-start" }}
+        onClick={handleSave}
+        disabled={!participant || saving}
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </div>
+  );
+}
+
+EventTimingCard.propTypes = {
+  participant: PropTypes.object,
+  onSave: PropTypes.func,
+};
+
 // ── Session timer ────────────────────────────────────────────────────
 
 function useSessionTimer(active) {
@@ -106,7 +234,7 @@ function useSessionTimer(active) {
 
 // ── Dashboard ────────────────────────────────────────────────────────
 
-export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam, onUnassign }) {
+export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam, onUnassign, participant, onSaveParticipant }) {
   const [ecuData, setEcuData] = useState(null);
   const [chartData, setChartData] = useState([]);
   const [historyData, setHistoryData] = useState([]);
@@ -388,6 +516,12 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
           </button>
         </div>
       </div>
+
+      {/* ── Event timing ── */}
+      <EventTimingCard
+        participant={participant ?? null}
+        onSave={onSaveParticipant}
+      />
 
       {/* ── Stat cards ── */}
       <div className="stat-cards">
@@ -747,4 +881,6 @@ Dashboard.propTypes = {
   teamName: PropTypes.string,
   onCreateTeam: PropTypes.func,
   onUnassign: PropTypes.func,
+  participant: PropTypes.object,
+  onSaveParticipant: PropTypes.func,
 };

@@ -45,6 +45,19 @@ export const assignEcuToTeam = (teamId, ecuId) =>
 export const unassignEcuFromTeam = (teamId, ecuId) =>
   request(`/teams/${teamId}/unassign/${ecuId}`, { method: "POST" });
 
+export const addTeamToCompetition = (competitionId, teamId) =>
+  request(`/competitions/${competitionId}/teams/${teamId}`, { method: "POST" });
+
+// ── Event Participants ────────────────────────────────────────────────
+export const fetchEventParticipants = (eventId) =>
+  request(`/event-participants/?event_id=${eventId}`);
+
+export const updateEventParticipant = (participantId, payload) =>
+  request(`/event-participants/${participantId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
 // ── Violations / Alerts ───────────────────────────────────────────────
 export const fetchViolations = (ecuId, limit = 50) =>
   request(`/violations?ecu_id=${ecuId}&limit=${limit}`);

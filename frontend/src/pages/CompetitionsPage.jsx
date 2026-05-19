@@ -1,6 +1,13 @@
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { fetchCompetitions, createCompetition, fetchCompetitionTeams } from "../api/http";
+import {
+  fetchCompetitions,
+  createCompetition,
+  fetchCompetitionTeams,
+  fetchTeams,
+  addTeamToCompetition,
+} from "../api/http";
+import { CreateTeamModal } from "../components/CreateTeamModal";
 import logo from "../assets/evolocity_logo.png";
 
 const ALL_EVENT_TYPES = ["drag_race", "gymkhana", "endurance_efficiency"];
@@ -29,9 +36,16 @@ const EVENT_ICONS = {
   ),
 };
 
-function CompetitionDetailModal({ competition, onClose, onOpen }) {
+// ── Competition Detail Modal ─────────────────────────────────────────────────
+
+function CompetitionDetailModal({ competition, allTeams, onClose, onOpen, onTeamAdded }) {
   const [teams, setTeams] = useState(null);
   const [loadingTeams, setLoadingTeams] = useState(true);
+  const [showAddTeams, setShowAddTeams] = useState(false);
+  const [addSearch, setAddSearch] = useState("");
+  const [addingId, setAddingId] = useState(null);
+  const [addError, setAddError] = useState(null);
+  const [addedIds, setAddedIds] = useState(new Set());
 
   useEffect(() => {
     fetchCompetitionTeams(competition.id)
@@ -39,6 +53,27 @@ function CompetitionDetailModal({ competition, onClose, onOpen }) {
       .catch(() => setTeams([]))
       .finally(() => setLoadingTeams(false));
   }, [competition.id]);
+
+  const existingIds = new Set([...(teams ?? []).map((t) => t.id), ...addedIds]);
+  const addableTeams = allTeams.filter((t) => !existingIds.has(t.id));
+  const filteredAddable = addSearch
+    ? addableTeams.filter((t) => t.name.toLowerCase().includes(addSearch.toLowerCase()))
+    : addableTeams;
+
+  async function handleAddTeam(teamId) {
+    setAddingId(teamId);
+    setAddError(null);
+    try {
+      const updated = await addTeamToCompetition(competition.id, teamId);
+      setAddedIds((prev) => new Set([...prev, teamId]));
+      setTeams((prev) => [...(prev ?? []), updated]);
+      onTeamAdded(updated);
+    } catch (err) {
+      setAddError(err.message || "Failed to add team");
+    } finally {
+      setAddingId(null);
+    }
+  }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -56,8 +91,9 @@ function CompetitionDetailModal({ competition, onClose, onOpen }) {
         </div>
 
         <div className="modal-body">
+          {/* Events */}
           <div className="form-field">
-            <label>Standard Event Types</label>
+            <label>Event Types</label>
             <div className="comp-detail-events">
               {competition.events.map((ev) => (
                 <div key={ev.id} className="comp-detail-event-row">
@@ -71,13 +107,25 @@ function CompetitionDetailModal({ competition, onClose, onOpen }) {
             </div>
           </div>
 
+          {/* Teams list */}
           <div className="form-field">
-            <label>
-              Teams&nbsp;
-              <span className="comp-detail-count">
-                ({loadingTeams ? "…" : (teams?.length ?? 0)})
-              </span>
-            </label>
+            <div className="comp-detail-teams-header">
+              <label>
+                Teams&nbsp;
+                <span className="comp-detail-count">
+                  ({loadingTeams ? "…" : (teams?.length ?? 0)})
+                </span>
+              </label>
+              {!showAddTeams && (
+                <button
+                  className="comp-detail-add-btn"
+                  onClick={() => setShowAddTeams(true)}
+                >
+                  + Add Teams
+                </button>
+              )}
+            </div>
+
             {loadingTeams ? (
               <div className="assign-ecu-loading">Loading teams…</div>
             ) : teams && teams.length > 0 ? (
@@ -92,9 +140,61 @@ function CompetitionDetailModal({ competition, onClose, onOpen }) {
                 ))}
               </div>
             ) : (
-              <p className="comp-detail-no-teams">No teams assigned to this competition yet.</p>
+              <p className="comp-detail-no-teams">No teams in this competition yet.</p>
             )}
           </div>
+
+          {/* Add teams inline */}
+          {showAddTeams && (
+            <div className="form-field comp-detail-add-section">
+              <label>Add Existing Teams</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Search teams…"
+                value={addSearch}
+                onChange={(e) => setAddSearch(e.target.value)}
+                autoFocus
+              />
+              {addableTeams.length === 0 ? (
+                <div className="assign-ecu-loading" style={{ marginTop: 6 }}>
+                  All teams are already in this competition
+                </div>
+              ) : filteredAddable.length === 0 ? (
+                <div className="assign-ecu-loading" style={{ marginTop: 6 }}>
+                  No teams match &ldquo;{addSearch}&rdquo;
+                </div>
+              ) : (
+                <div className="add-team-list" style={{ marginTop: 6 }}>
+                  {filteredAddable.map((team) => (
+                    <div key={team.id} className="add-team-row">
+                      <div className="add-team-info">
+                        <span className="add-team-name">{team.name}</span>
+                        <span className="add-team-meta">
+                          {team.vehicle_class} · {team.vehicle_type}
+                        </span>
+                      </div>
+                      <button
+                        className="btn-primary add-team-btn"
+                        onClick={() => handleAddTeam(team.id)}
+                        disabled={addingId === team.id}
+                      >
+                        {addingId === team.id ? "Adding…" : "Add"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {addError && <div className="form-feedback error" style={{ marginTop: 6 }}>{addError}</div>}
+              <button
+                className="btn-secondary"
+                style={{ marginTop: 8, alignSelf: "flex-start" }}
+                onClick={() => { setShowAddTeams(false); setAddSearch(""); setAddError(null); }}
+              >
+                Done
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="modal-footer">
@@ -116,9 +216,13 @@ function CompetitionDetailModal({ competition, onClose, onOpen }) {
 
 CompetitionDetailModal.propTypes = {
   competition: PropTypes.object.isRequired,
+  allTeams: PropTypes.array.isRequired,
   onClose: PropTypes.func.isRequired,
   onOpen: PropTypes.func.isRequired,
+  onTeamAdded: PropTypes.func.isRequired,
 };
+
+// ── Competition Card ─────────────────────────────────────────────────────────
 
 function CompetitionCard({ competition, onSelect, onViewDetail }) {
   return (
@@ -158,34 +262,69 @@ CompetitionCard.propTypes = {
   onViewDetail: PropTypes.func.isRequired,
 };
 
+// ── Team Global Card ─────────────────────────────────────────────────────────
+
+function TeamGlobalCard({ team, competitions }) {
+  const competition = competitions.find((c) => c.id === team.competition_id);
+  return (
+    <div className="team-global-card">
+      <div className="team-global-name">{team.name}</div>
+      <div className="team-global-meta">
+        {team.vehicle_class} Class · {team.vehicle_type.charAt(0).toUpperCase() + team.vehicle_type.slice(1)}
+      </div>
+      <div className={`team-global-comp ${competition ? "" : "unassigned"}`}>
+        {competition ? competition.name : "No competition"}
+      </div>
+    </div>
+  );
+}
+
+TeamGlobalCard.propTypes = {
+  team: PropTypes.object.isRequired,
+  competitions: PropTypes.array.isRequired,
+};
+
+// ── Competitions Page ────────────────────────────────────────────────────────
+
 export function CompetitionsPage({ onSelectCompetition }) {
   const [competitions, setCompetitions] = useState([]);
+  const [allTeams, setAllTeams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [backendError, setBackendError] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+
+  // New competition modal
+  const [showNewComp, setShowNewComp] = useState(false);
   const [newName, setNewName] = useState("");
   const [selectedEvents, setSelectedEvents] = useState([...ALL_EVENT_TYPES]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
+
+  // New team modal
+  const [showNewTeam, setShowNewTeam] = useState(false);
+
+  // Competition detail modal
   const [detailCompetition, setDetailCompetition] = useState(null);
 
   useEffect(() => {
-    fetchCompetitions()
-      .then(setCompetitions)
+    Promise.all([fetchCompetitions(), fetchTeams()])
+      .then(([comps, teams]) => {
+        setCompetitions(comps);
+        setAllTeams(teams);
+      })
       .catch(() => setBackendError(true))
       .finally(() => setLoading(false));
   }, []);
 
-  function openModal() {
+  function openNewCompModal() {
     setNewName("");
     setSelectedEvents([...ALL_EVENT_TYPES]);
     setCreateError(null);
-    setShowModal(true);
+    setShowNewComp(true);
   }
 
-  function closeModal() {
+  function closeNewCompModal() {
     if (creating) return;
-    setShowModal(false);
+    setShowNewComp(false);
     setCreateError(null);
   }
 
@@ -195,7 +334,7 @@ export function CompetitionsPage({ onSelectCompetition }) {
     );
   }
 
-  async function handleCreate(e) {
+  async function handleCreateCompetition(e) {
     e.preventDefault();
     if (!newName.trim() || selectedEvents.length === 0) return;
     setCreating(true);
@@ -203,7 +342,7 @@ export function CompetitionsPage({ onSelectCompetition }) {
     try {
       const created = await createCompetition(newName.trim(), selectedEvents);
       setCompetitions((prev) => [...prev, created]);
-      setShowModal(false);
+      setShowNewComp(false);
     } catch (err) {
       setCreateError(err.message || "Failed to create competition");
     } finally {
@@ -211,18 +350,35 @@ export function CompetitionsPage({ onSelectCompetition }) {
     }
   }
 
-  const canSubmit = newName.trim() && selectedEvents.length > 0 && !creating;
+  function handleTeamCreated(team) {
+    setAllTeams((prev) => [...prev, team]);
+    setShowNewTeam(false);
+  }
+
+  function handleTeamAddedToCompetition(team) {
+    setAllTeams((prev) =>
+      prev.map((t) => (t.id === team.id ? team : t))
+    );
+  }
+
+  const canSubmitComp = newName.trim() && selectedEvents.length > 0 && !creating;
 
   return (
     <div className="competitions-page">
       <nav className="competitions-topbar">
         <img src={logo} alt="EVolocity" className="navbar-logo-img" />
-        <button className="btn-primary" onClick={openModal}>
-          + New Competition
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-secondary" onClick={() => setShowNewTeam(true)}>
+            + New Team
+          </button>
+          <button className="btn-primary" onClick={openNewCompModal}>
+            + New Competition
+          </button>
+        </div>
       </nav>
 
       <div className="competitions-content">
+        {/* ── Competitions section ── */}
         <div className="competitions-heading">
           <h1>Competitions</h1>
           <p>Select a competition to open its live dashboard</p>
@@ -251,7 +407,7 @@ export function CompetitionsPage({ onSelectCompetition }) {
             </svg>
             <p>No competitions yet</p>
             <span>Create your first competition to get started</span>
-            <button className="btn-primary" onClick={openModal}>
+            <button className="btn-primary" onClick={openNewCompModal}>
               + New Competition
             </button>
           </div>
@@ -269,21 +425,53 @@ export function CompetitionsPage({ onSelectCompetition }) {
             ))}
           </div>
         )}
+
+        {/* ── Teams section ── */}
+        {!loading && !backendError && (
+          <>
+            <div className="section-divider" />
+            <div className="teams-section-header">
+              <div>
+                <h2>Teams</h2>
+                <p>Teams are independent — add them to a competition via View Details</p>
+              </div>
+              <button className="btn-secondary" onClick={() => setShowNewTeam(true)}>
+                + New Team
+              </button>
+            </div>
+
+            {allTeams.length === 0 ? (
+              <div className="teams-empty">
+                <p>No teams yet</p>
+                <span>Create a team to get started</span>
+                <button className="btn-primary" style={{ marginTop: 8 }} onClick={() => setShowNewTeam(true)}>
+                  + New Team
+                </button>
+              </div>
+            ) : (
+              <div className="teams-grid">
+                {allTeams.map((team) => (
+                  <TeamGlobalCard key={team.id} team={team} competitions={competitions} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
-      {/* ── New Competition modal ───────────────────────────────── */}
-      {showModal && (
-        <div className="modal-overlay" onClick={closeModal}>
+      {/* ── New Competition modal ── */}
+      {showNewComp && (
+        <div className="modal-overlay" onClick={closeNewCompModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>New Competition</h2>
-              <button className="icon-btn" onClick={closeModal}>
+              <button className="icon-btn" onClick={closeNewCompModal}>
                 <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
                   <path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z" />
                 </svg>
               </button>
             </div>
-            <form onSubmit={handleCreate}>
+            <form onSubmit={handleCreateCompetition}>
               <div className="modal-body">
                 <div className="form-field">
                   <label>Competition Name</label>
@@ -348,10 +536,10 @@ export function CompetitionsPage({ onSelectCompetition }) {
                 )}
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn-secondary" onClick={closeModal} disabled={creating}>
+                <button type="button" className="btn-secondary" onClick={closeNewCompModal} disabled={creating}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary" disabled={!canSubmit}>
+                <button type="submit" className="btn-primary" disabled={!canSubmitComp}>
                   {creating ? "Creating…" : "Create Competition"}
                 </button>
               </div>
@@ -360,12 +548,22 @@ export function CompetitionsPage({ onSelectCompetition }) {
         </div>
       )}
 
-      {/* ── Competition detail modal ────────────────────────────── */}
+      {/* ── New Team modal ── */}
+      {showNewTeam && (
+        <CreateTeamModal
+          onCreated={handleTeamCreated}
+          onClose={() => setShowNewTeam(false)}
+        />
+      )}
+
+      {/* ── Competition detail modal ── */}
       {detailCompetition && (
         <CompetitionDetailModal
           competition={detailCompetition}
+          allTeams={allTeams}
           onClose={() => setDetailCompetition(null)}
           onOpen={() => onSelectCompetition(detailCompetition)}
+          onTeamAdded={handleTeamAddedToCompetition}
         />
       )}
     </div>

@@ -13,7 +13,7 @@ const CloseIcon = () => (
   </svg>
 );
 
-export function CreateTeamModal({ competitionId, onCreated, onClose }) {
+export function CreateTeamModal({ onCreated, onClose }) {
   // ── Step 1 state ──────────────────────────────────────────────
   const [step, setStep] = useState(1);
   const [name, setName] = useState("");
@@ -35,7 +35,6 @@ export function CreateTeamModal({ competitionId, onCreated, onClose }) {
         name: name.trim(),
         vehicle_class: vehicleClass,
         vehicle_type: vehicleType,
-        competition_id: competitionId,
       });
       setCreatedTeam(team);
       onCreated(team, null);
@@ -140,7 +139,6 @@ export function CreateTeamModal({ competitionId, onCreated, onClose }) {
 }
 
 CreateTeamModal.propTypes = {
-  competitionId: PropTypes.number.isRequired,
   onCreated: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
 };
