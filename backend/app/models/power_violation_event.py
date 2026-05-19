@@ -30,5 +30,7 @@ class PowerViolationEvent(Base):
 	peak_power_watts: Mapped[float] = mapped_column(Float, nullable=False)
 	frame_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 	is_warning: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+	trigger_frame_id: Mapped[int | None] = mapped_column(ForeignKey("energy_frames.id", ondelete="SET NULL"), nullable=True, index=True)
 
 	ecu = relationship("ECU", back_populates="violation_events")
+	trigger_frame = relationship("EnergyFrame")

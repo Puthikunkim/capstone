@@ -15,5 +15,6 @@ class PowerViolationEventResponse(BaseModel):
 	peak_power_watts: float
 	frame_count: int
 	is_warning: bool
+	trigger_frame_id: int | None = None
 
 	model_config = {"from_attributes": True}

@@ -29,7 +29,7 @@ from pydantic import ValidationError
 from app.database import SessionLocal
 from app.schemas.energy_frame import EnergyFrameIngest
 from app.services.ingest import persist_and_broadcast_frame
-from app.services.processing import convert_current_and_average, convert_voltage_and_average
+from app.services.processing import compute_power_samples, convert_current_samples, convert_voltage_samples
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -186,11 +186,14 @@ async def process_frames(queue: asyncio.Queue) -> None:
                 )
                 continue
 
+            v_samples = convert_voltage_samples(ingest.voltage_samples)
+            i_samples = convert_current_samples(ingest.current_samples)
             processed = {
-                "mac_address": ingest.mac_address,
-                "timestamp":   ingest.timestamp,
-                "avg_voltage": convert_voltage_and_average(ingest.voltage_samples),
-                "avg_current": convert_current_and_average(ingest.current_samples),
+                "mac_address":     ingest.mac_address,
+                "timestamp":       ingest.timestamp,
+                "voltage_samples": v_samples,
+                "current_samples": i_samples,
+                "power_samples":   compute_power_samples(v_samples, i_samples),
             }
 
             db = SessionLocal()
@@ -198,12 +201,11 @@ async def process_frames(queue: asyncio.Queue) -> None:
                 _, created = await persist_and_broadcast_frame(db, processed)
                 if created:
                     logger.info(
-                        "Frame saved — MAC %s  counter=%d  esp_ts=%s  V=%.2f  A=%.3f",
+                        "Frame saved — MAC %s  counter=%d  esp_ts=%s  peak_W=%.2f",
                         mac_address,
                         frame["counter"],
                         frame.get("tx_time_ms", "?"),
-                        processed["avg_voltage"],
-                        processed["avg_current"],
+                        max(processed["power_samples"]),
                     )
                 else:
                     logger.debug(

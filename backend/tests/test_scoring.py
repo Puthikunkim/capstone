@@ -26,12 +26,12 @@ def make_ecu(db, mac_address="AA:BB:CC:DD:EE:01", vehicle_class=VehicleClass.STA
 
 
 def make_frame(db, ecu_id, timestamp_str, power_watts=100.0, energy=0.1):
+    samples = [power_watts] * 10
     frame = EnergyFrame(
         ecu_id=ecu_id,
         timestamp=datetime.fromisoformat(timestamp_str),
-        avg_voltage=41.0,
-        avg_current=power_watts / 41.0,
-        power_watts=power_watts,
+        power_samples=samples,
+        power_watts=max(samples),
         energy=energy,
     )
     db.add(frame)

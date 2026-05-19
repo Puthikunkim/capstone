@@ -56,12 +56,6 @@ class ECU(Base):
 		passive_deletes=True,
 	) # An ECU can have many energy frames, if an ECU is deleted, we want all its frames to be deleted as well, and we want the database to handle this cascade for integrity and performance
 	team = relationship("Team", back_populates="ecus")
-	alerts = relationship(
-		"Alert",
-		back_populates="ecu",
-		cascade="all, delete-orphan",
-		passive_deletes=True,
-	) 
 	violation_events = relationship(
 		"PowerViolationEvent",
 		back_populates="ecu",

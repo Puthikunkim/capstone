@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.competition import CompetitionEvent
 from app.models.ecu import ECU
+from app.models.event_participant import EventParticipant
 from app.models.team import Team
 from app.schemas.team import TeamCreate
 
@@ -30,9 +33,26 @@ def create_team(db: Session, payload: TeamCreate) -> Team:
         vehicle_type=payload.vehicle_type,
     )
     db.add(team)
+    db.flush()
+
+    if payload.competition_id is not None:
+        _enroll_team_in_competition_events(db, team, payload.competition_id)
+
     db.commit()
     db.refresh(team)
     return team
+
+
+def _enroll_team_in_competition_events(db: Session, team: Team, competition_id: int) -> None:
+    events = db.scalars(
+        select(CompetitionEvent).where(CompetitionEvent.competition_id == competition_id)
+    ).all()
+    try:
+        with db.begin_nested():
+            for event in events:
+                db.add(EventParticipant(team_id=team.id, event_id=event.id))
+    except IntegrityError:
+        pass  # already enrolled — outer transaction (and team) stays intact
 
 
 def list_teams(db: Session) -> list[Team]:

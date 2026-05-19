@@ -1,4 +1,3 @@
-from .alert import AlertResponse
 from .competition import (
     CompetitionCreate,
     CompetitionDetailResponse,
@@ -35,7 +34,6 @@ __all__ = [
     "EnergyFrameBatchIngest", "EnergyFrameBatchResponse",
     "FirmwareJobStatus", "FirmwareUploadResponse", "FirmwareStatusResponse", "FirmwareProgressUpdate",
     "ScoringMetric", "ScoringStatus", "ScoringEnergySource", "ScoringEntryResponse", "ScoringBracketResponse", "ScoringEventResponse",
-    "AlertResponse",
     "CompetitionCreate", "CompetitionResponse", "CompetitionDetailResponse", "CompetitionEventResponse",
     "PowerViolationEventResponse",
     "TeamCreate", "TeamResponse", "TeamDetailResponse",

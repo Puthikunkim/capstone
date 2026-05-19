@@ -49,7 +49,6 @@ def client(db):
     with (
         patch.object(manager, "notify", new_callable=AsyncMock),
         patch.object(manager, "notify_violation_event", new_callable=AsyncMock),
-        patch.object(manager, "notify_alert", new_callable=AsyncMock),
         patch("main.init_db"),
     ):
         with TestClient(fastapi_app) as c:

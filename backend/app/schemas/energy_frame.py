@@ -18,10 +18,10 @@ class EnergyFrameResponse(BaseModel):
     id: int
     ecu_id: int
     timestamp: datetime
-    avg_voltage: float
-    avg_current: float
-    power_watts: float
-    energy: float              
+    voltage_samples: list[float] | None = None
+    current_samples: list[float] | None = None
+    power_samples: list[float] | None = None
+    energy: float
 
     model_config = {"from_attributes": True}
 

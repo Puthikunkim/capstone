@@ -15,17 +15,19 @@ CURRENT_OFFSET_V = 1.65       # voltage output at 0A
 CURRENT_SENSITIVITY = 0.066   # V/A (e.g. ACS712-30A = 0.066 V/A)
 
 
-def convert_voltage_and_average(voltage_samples: list[int]) -> float:
-    converted = [
+def convert_voltage_samples(voltage_samples: list[int]) -> list[float]:
+    return [
         (sample / ADC_RESOLUTION) * ADC_REFERENCE_V * VOLTAGE_DIVIDER_RATIO
         for sample in voltage_samples
     ]
-    return sum(converted) / len(converted)
 
 
-def convert_current_and_average(current_samples: list[int]) -> float:
-    converted = [
+def convert_current_samples(current_samples: list[int]) -> list[float]:
+    return [
         ((sample / ADC_RESOLUTION) * ADC_REFERENCE_V - CURRENT_OFFSET_V) / CURRENT_SENSITIVITY
         for sample in current_samples
     ]
-    return sum(converted) / len(converted)
+
+
+def compute_power_samples(voltage_samples: list[float], current_samples: list[float]) -> list[float]:
+    return [v * i for v, i in zip(voltage_samples, current_samples)]

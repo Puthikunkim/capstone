@@ -34,6 +34,13 @@ def _to_utc(timestamp: datetime) -> datetime:
     return timestamp.astimezone(timezone.utc)
 
 
+def _frame_mean_power(frame: EnergyFrame) -> float:
+    samples = frame.power_samples
+    if samples:
+        return sum(samples) / len(samples)
+    return float(frame.power_watts)
+
+
 def _metric_value(
     aggregate: _Aggregate,
     metric: ScoringMetric,
@@ -65,7 +72,7 @@ def _integrated_energy_wh(frames: list[EnergyFrame]) -> float:
         previous_ts = _to_utc(previous.timestamp)
         current_ts = _to_utc(current.timestamp)
         delta_seconds = max(0.0, (current_ts - previous_ts).total_seconds())
-        avg_power = (float(previous.power_watts) + float(current.power_watts)) / 2.0
+        avg_power = (_frame_mean_power(previous) + _frame_mean_power(current)) / 2.0
         integrated_wh += (avg_power * delta_seconds) / 3600.0
 
     return integrated_wh
@@ -91,7 +98,7 @@ def _load_aggregates(db: Session, start: datetime, end: datetime) -> dict[int, _
         elapsed_seconds = max(0.0, (last_seen - first_seen).total_seconds())
         frame_count = len(frames)
         transmitted_energy_wh = sum(float(frame.energy) for frame in frames)
-        avg_power_watts = sum(float(frame.power_watts) for frame in frames) / frame_count
+        avg_power_watts = sum(_frame_mean_power(frame) for frame in frames) / frame_count
         integrated_energy_wh = _integrated_energy_wh(frames)
 
         aggregates[int(ecu_id)] = _Aggregate(
