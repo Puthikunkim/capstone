@@ -74,7 +74,6 @@ export function Sidebar({
   violatingEcuIds,
   onSelectTeam,
   onUnassignEcu,
-  onCreateTeam,
 }) {
   const [query, setQuery] = useState("");
 
@@ -143,20 +142,11 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="sidebar-section-label">
-        Teams
-        {onCreateTeam && (
-          <button className="sidebar-add-btn" onClick={onCreateTeam} title="Add team">
-            <svg viewBox="0 0 14 14" fill="none" width="12" height="12">
-              <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
-      </div>
+      <div className="sidebar-section-label">Teams</div>
 
       <div className="sidebar-ecu-list">
         {(teams ?? []).length === 0 && (
-          <div className="sidebar-empty">No teams in this event</div>
+          <div className="sidebar-empty">No teams in this competition</div>
         )}
         {(teams ?? []).length > 0 && filteredTeams.length === 0 && (
           <div className="sidebar-empty">No results for &ldquo;{query}&rdquo;</div>
@@ -193,5 +183,4 @@ Sidebar.propTypes = {
   violatingEcuIds: PropTypes.instanceOf(Set),
   onSelectTeam: PropTypes.func.isRequired,
   onUnassignEcu: PropTypes.func,
-  onCreateTeam: PropTypes.func,
 };

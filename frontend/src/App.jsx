@@ -16,6 +16,7 @@ import {
   updateEventParticipant,
 } from "./api/http";
 import { AddTeamToCompetitionModal } from "./components/AddTeamToCompetitionModal";
+import { CompetitionTeamsPanel } from "./components/CompetitionTeamsPanel";
 import "./App.css";
 
 export default function App() {
@@ -257,20 +258,15 @@ export default function App() {
             violatingEcuIds={violatingEcuIds}
             onSelectTeam={handleSelectTeam}
             onUnassignEcu={handleUnassignEcu}
-            onCreateTeam={() => setShowAddTeam(true)}
           />
         )}
         <main className="main-content">
           {!selectedEvent ? (
-            <div className="dashboard">
-              <div className="dashboard-empty">
-                <svg className="empty-icon" viewBox="0 0 48 48" fill="none">
-                  <circle cx="24" cy="24" r="18" stroke="currentColor" strokeWidth="2" />
-                  <path d="M24 16v8l4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-                <p>Select an event from the sidebar to view teams</p>
-              </div>
-            </div>
+            <CompetitionTeamsPanel
+              teams={competitionTeams}
+              ecuList={competitionEcus}
+              onAddTeam={() => setShowAddTeam(true)}
+            />
           ) : selectedTeam && !hasEcu ? (
             <div className="dashboard">
               <div className="dashboard-empty">
