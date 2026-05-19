@@ -29,7 +29,7 @@ from pydantic import ValidationError
 from app.database import SessionLocal
 from app.schemas.energy_frame import EnergyFrameIngest
 from app.services.ingest import persist_and_broadcast_frame
-from app.services.processing import convert_current_and_average, convert_voltage_and_average
+from app.services.processing import convert_current_and_average, convert_current_samples, convert_voltage_and_average, convert_voltage_samples
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -187,10 +187,12 @@ async def process_frames(queue: asyncio.Queue) -> None:
                 continue
 
             processed = {
-                "mac_address": ingest.mac_address,
-                "timestamp":   ingest.timestamp,
-                "avg_voltage": convert_voltage_and_average(ingest.voltage_samples),
-                "avg_current": convert_current_and_average(ingest.current_samples),
+                "mac_address":     ingest.mac_address,
+                "timestamp":       ingest.timestamp,
+                "avg_voltage":     convert_voltage_and_average(ingest.voltage_samples),
+                "avg_current":     convert_current_and_average(ingest.current_samples),
+                "voltage_samples": convert_voltage_samples(ingest.voltage_samples),
+                "current_samples": convert_current_samples(ingest.current_samples),
             }
 
             db = SessionLocal()

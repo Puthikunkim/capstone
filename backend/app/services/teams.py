@@ -47,12 +47,12 @@ def _enroll_team_in_competition_events(db: Session, team: Team, competition_id: 
     events = db.scalars(
         select(CompetitionEvent).where(CompetitionEvent.competition_id == competition_id)
     ).all()
-    for event in events:
-        db.add(EventParticipant(team_id=team.id, event_id=event.id))
     try:
-        db.flush()
+        with db.begin_nested():
+            for event in events:
+                db.add(EventParticipant(team_id=team.id, event_id=event.id))
     except IntegrityError:
-        db.rollback()
+        pass  # already enrolled — outer transaction (and team) stays intact
 
 
 def list_teams(db: Session) -> list[Team]:

@@ -165,6 +165,8 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 		timestamp=frame_timestamp,
 		avg_voltage=float(payload["avg_voltage"]),
 		avg_current=float(payload["avg_current"]),
+		voltage_samples=payload.get("voltage_samples"),
+		current_samples=payload.get("current_samples"),
 		power_watts=float(payload["avg_voltage"]) * float(payload["avg_current"]),
 		energy=0.0,
 	)
