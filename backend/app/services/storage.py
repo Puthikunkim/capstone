@@ -159,15 +159,17 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 		db.refresh(existing_frame)
 		return existing_frame, False
 
+	power_samples = payload.get("power_samples") or []
 	frame = EnergyFrame(
 		ecu_id=ecu.id,
 		team_id=ecu.team_id,
 		timestamp=frame_timestamp,
-		avg_voltage=float(payload["avg_voltage"]),
-		avg_current=float(payload["avg_current"]),
+		avg_voltage=0.0,
+		avg_current=0.0,
 		voltage_samples=payload.get("voltage_samples"),
 		current_samples=payload.get("current_samples"),
-		power_watts=float(payload["avg_voltage"]) * float(payload["avg_current"]),
+		power_samples=power_samples or None,
+		power_watts=max(power_samples) if power_samples else 0.0,
 		energy=0.0,
 	)
 	db.add(frame)

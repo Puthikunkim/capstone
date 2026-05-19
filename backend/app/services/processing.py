@@ -29,11 +29,5 @@ def convert_current_samples(current_samples: list[int]) -> list[float]:
     ]
 
 
-def convert_voltage_and_average(voltage_samples: list[int]) -> float:
-    converted = convert_voltage_samples(voltage_samples)
-    return sum(converted) / len(converted)
-
-
-def convert_current_and_average(current_samples: list[int]) -> float:
-    converted = convert_current_samples(current_samples)
-    return sum(converted) / len(converted)
+def compute_power_samples(voltage_samples: list[float], current_samples: list[float]) -> list[float]:
+    return [v * i for v, i in zip(voltage_samples, current_samples)]

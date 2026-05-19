@@ -20,7 +20,7 @@ class EnergyFrameResponse(BaseModel):
     timestamp: datetime
     voltage_samples: list[float] | None = None
     current_samples: list[float] | None = None
-    power_watts: float
+    power_samples: list[float] | None = None
     energy: float
 
     model_config = {"from_attributes": True}

@@ -63,6 +63,7 @@ def init_db() -> None:
 	Base.metadata.create_all(bind=engine)
 	_ensure_energy_frame_power_column()
 	_ensure_energy_frame_samples_columns()
+	_ensure_energy_frame_power_samples_column()
 	_ensure_ecu_team_id_column()
 	_ensure_teams_competition_id_column()
 
@@ -94,6 +95,18 @@ def _ensure_energy_frame_samples_columns() -> None:
 			conn.execute(text("ALTER TABLE energy_frames ADD COLUMN voltage_samples TEXT"))
 		if "current_samples" not in column_names:
 			conn.execute(text("ALTER TABLE energy_frames ADD COLUMN current_samples TEXT"))
+
+
+def _ensure_energy_frame_power_samples_column() -> None:
+	"""Add power_samples JSON column to existing databases."""
+	inspector = inspect(engine)
+	if "energy_frames" not in inspector.get_table_names():
+		return
+
+	column_names = {column["name"] for column in inspector.get_columns("energy_frames")}
+	if "power_samples" not in column_names:
+		with engine.begin() as conn:
+			conn.execute(text("ALTER TABLE energy_frames ADD COLUMN power_samples TEXT"))
 
 
 def _ensure_ecu_team_id_column() -> None:
