@@ -7,7 +7,7 @@ from app.database import get_db
 from app.schemas.ecu import ECUResponse
 from app.schemas.team import TeamCreate, TeamDetailResponse, TeamResponse
 from app.schemas.energy_frame import EnergyFrameResponse
-from app.services.storage import get_ecu, get_frames_for_team
+from app.services.storage import TeamNotEnrolledInEventError, get_ecu, get_frames_for_team
 from app.services.teams import (
     ECUAssignmentConflictError,
     TeamNameConflictError,
@@ -77,7 +77,10 @@ def get_team_frames(
     team = get_team(db, team_id)
     if team is None:
         raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
-    return get_frames_for_team(db, team_id, event_id=event_id, limit=limit)
+    try:
+        return get_frames_for_team(db, team_id, event_id=event_id, limit=limit)
+    except TeamNotEnrolledInEventError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/{team_id}/assign/{ecu_id}", response_model=ECUResponse)

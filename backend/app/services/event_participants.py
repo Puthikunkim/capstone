@@ -61,9 +61,9 @@ def update_event_participant(
     if participant is None:
         return None
 
-    if payload.start is not None:
+    if "start" in payload.model_fields_set:
         participant.start = payload.start
-    if payload.duration_seconds is not None:
+    if "duration_seconds" in payload.model_fields_set:
         participant.duration_seconds = payload.duration_seconds
 
     db.commit()

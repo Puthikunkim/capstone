@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models.competition import Competition, CompetitionEvent, CompetitionEventType
 from app.models.ecu import ECU, VehicleClass, VehicleType
 from app.models.energy_frame import EnergyFrame
@@ -118,7 +120,7 @@ class TestCreateEventParticipant:
         assert resp.status_code == 201
         body = resp.json()
         assert body["start"] is not None
-        assert body["duration_seconds"] == 3600.0
+        assert body["duration_seconds"] == pytest.approx(3600.0)
         assert body["end"] is not None
 
     def test_end_is_start_plus_duration(self, client, db):
@@ -226,7 +228,7 @@ class TestUpdateEventParticipant:
         })
         assert resp.status_code == 200
         body = resp.json()
-        assert body["duration_seconds"] == 1800.0
+        assert body["duration_seconds"] == pytest.approx(1800.0)
         assert body["start"] is not None
         assert body["end"] is not None
 
@@ -241,8 +243,36 @@ class TestUpdateEventParticipant:
 
         resp = client.patch(f"/api/event-participants/{p.id}", json={"duration_seconds": 7200.0})
         assert resp.status_code == 200
-        assert resp.json()["duration_seconds"] == 7200.0
+        assert resp.json()["duration_seconds"] == pytest.approx(7200.0)
         assert resp.json()["start"] is not None
+
+    def test_can_clear_start_back_to_null(self, client, db):
+        comp = make_competition(db)
+        team = make_team(db)
+        p = make_participant(
+            db, team.id, comp.events[0].id,
+            start=datetime(2024, 6, 1, 9, 0, tzinfo=timezone.utc),
+            duration_seconds=3600.0,
+        )
+
+        resp = client.patch(f"/api/event-participants/{p.id}", json={"start": None})
+        assert resp.status_code == 200
+        assert resp.json()["start"] is None
+        assert resp.json()["duration_seconds"] == 3600.0
+
+    def test_omitting_field_does_not_clear_it(self, client, db):
+        comp = make_competition(db)
+        team = make_team(db)
+        p = make_participant(
+            db, team.id, comp.events[0].id,
+            start=datetime(2024, 6, 1, 9, 0, tzinfo=timezone.utc),
+            duration_seconds=3600.0,
+        )
+
+        resp = client.patch(f"/api/event-participants/{p.id}", json={"duration_seconds": 7200.0})
+        assert resp.status_code == 200
+        assert resp.json()["start"] is not None
+        assert resp.json()["duration_seconds"] == pytest.approx(7200.0)
 
     def test_returns_404_when_not_found(self, client):
         resp = client.patch("/api/event-participants/9999", json={"duration_seconds": 100.0})
@@ -307,7 +337,7 @@ class TestAutoEnroll:
             assert p["duration_seconds"] is None
             assert p["end"] is None
 
-    def test_no_participants_created_when_no_competition(self, client, db):
+    def test_no_participants_created_when_no_competition(self, client):
         resp = client.post("/api/teams/", json={
             "name": "Team Alpha",
             "vehicle_class": "Standard",
@@ -374,7 +404,16 @@ class TestTeamFrames:
         assert resp.status_code == 200
         assert len(resp.json()) == 1
 
-    def test_returns_all_frames_when_event_has_no_time_window(self, client, db):
+    def test_returns_404_when_team_not_enrolled_in_event(self, client, db):
+        comp = make_competition(db)
+        team = make_team(db)
+        event = comp.events[0]
+        # no participant record created
+
+        resp = client.get(f"/api/teams/{team.id}/frames?event_id={event.id}")
+        assert resp.status_code == 404
+
+    def test_returns_all_frames_when_enrolled_but_no_start_set(self, client, db):
         comp = make_competition(db)
         team = make_team(db)
         ecu = make_ecu(db, team_id=team.id)
@@ -388,6 +427,22 @@ class TestTeamFrames:
         resp = client.get(f"/api/teams/{team.id}/frames?event_id={event.id}")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
+
+    def test_filters_from_start_when_live(self, client, db):
+        comp = make_competition(db)
+        team = make_team(db)
+        ecu = make_ecu(db, team_id=team.id)
+
+        event = comp.events[0]
+        start = datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc)
+        make_participant(db, team.id, event.id, start=start)  # no duration — live
+
+        make_frame(db, ecu.id, team_id=team.id, timestamp_str="2024-01-01T10:30:00+00:00")  # after start
+        make_frame(db, ecu.id, team_id=team.id, timestamp_str="2024-01-01T09:00:00+00:00")  # before start
+
+        resp = client.get(f"/api/teams/{team.id}/frames?event_id={event.id}")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
 
     def test_frames_from_multiple_ecus_returned_for_same_team(self, client, db):
         team = make_team(db)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.competition import CompetitionEvent
@@ -47,14 +48,11 @@ def _enroll_team_in_competition_events(db: Session, team: Team, competition_id: 
         select(CompetitionEvent).where(CompetitionEvent.competition_id == competition_id)
     ).all()
     for event in events:
-        already_enrolled = db.scalar(
-            select(EventParticipant).where(
-                EventParticipant.team_id == team.id,
-                EventParticipant.event_id == event.id,
-            )
-        )
-        if already_enrolled is None:
-            db.add(EventParticipant(team_id=team.id, event_id=event.id))
+        db.add(EventParticipant(team_id=team.id, event_id=event.id))
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
 
 
 def list_teams(db: Session) -> list[Team]:

@@ -281,6 +281,10 @@ def get_alert(db: Session, alert_id: int) -> Alert | None:
 	return db.get(Alert, alert_id)
 
 
+class TeamNotEnrolledInEventError(ValueError):
+	pass
+
+
 def get_frames_for_team(
 	db: Session,
 	team_id: int,
@@ -300,12 +304,15 @@ def get_frames_for_team(
 				EventParticipant.event_id == event_id,
 			)
 		)
-		if participant is not None and participant.start is not None and participant.duration_seconds is not None:
-			end = participant.start + timedelta(seconds=participant.duration_seconds)
-			stmt = stmt.where(
-				EnergyFrame.timestamp >= _to_utc(participant.start),
-				EnergyFrame.timestamp <= _to_utc(end),
+		if participant is None:
+			raise TeamNotEnrolledInEventError(
+				f"Team {team_id} is not enrolled in event {event_id}"
 			)
+		if participant.start is not None:
+			stmt = stmt.where(EnergyFrame.timestamp >= _to_utc(participant.start))
+		if participant.start is not None and participant.duration_seconds is not None:
+			end = participant.start + timedelta(seconds=participant.duration_seconds)
+			stmt = stmt.where(EnergyFrame.timestamp <= _to_utc(end))
 
 	if limit is not None:
 		stmt = stmt.limit(max(0, limit))
