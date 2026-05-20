@@ -4,13 +4,14 @@ import { CompetitionsPage } from './CompetitionsPage';
 
 vi.mock('../api/http', () => ({
   fetchCompetitions: vi.fn(),
+  fetchTeams: vi.fn(),
   createCompetition: vi.fn(),
   fetchCompetitionTeams: vi.fn(),
 }));
 
 vi.mock('../assets/evolocity_logo.png', () => ({ default: 'logo.png' }));
 
-import { fetchCompetitions, createCompetition, fetchCompetitionTeams } from '../api/http';
+import { fetchCompetitions, fetchTeams, createCompetition, fetchCompetitionTeams } from '../api/http';
 
 const COMP = {
   id: 1,
@@ -20,6 +21,7 @@ const COMP = {
 
 beforeEach(() => {
   fetchCompetitions.mockResolvedValue([]);
+  fetchTeams.mockResolvedValue([]);
   createCompetition.mockResolvedValue({ ...COMP, id: 2, name: 'New Comp' });
   fetchCompetitionTeams.mockResolvedValue([]);
 });

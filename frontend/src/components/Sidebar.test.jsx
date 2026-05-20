@@ -14,37 +14,39 @@ const ECUS = [
   { id: 11, serial_number: '1002', team_id: null, team_number: 2, is_connected: false, last_seen: null, flash_usage: null, vehicle_class: 'Standard' },
 ];
 
+const SELECTED_EVENT = { id: 1, event_type: 'drag_race' };
+
 describe('Sidebar — team mode', () => {
   test('renders a card for each team', () => {
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
     expect(screen.getByText('Team Alpha')).toBeInTheDocument();
     expect(screen.getByText('Team Beta')).toBeInTheDocument();
   });
 
   test('shows "No ECU assigned" for team without ECU', () => {
-    render(<Sidebar teams={TEAMS} ecuList={[]} onSelectTeam={noop} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={[]} onSelectTeam={noop} />);
     expect(screen.getAllByText('No ECU assigned')).toHaveLength(2);
   });
 
   test('shows ECU serial number for team with ECU', () => {
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
     expect(screen.getByText('ECU #1001')).toBeInTheDocument();
   });
 
   test('shows empty state when no teams exist', () => {
-    render(<Sidebar teams={[]} ecuList={[]} onSelectTeam={noop} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={[]} ecuList={[]} onSelectTeam={noop} />);
     expect(screen.getByText('No teams in this competition')).toBeInTheDocument();
   });
 
   test('calls onSelectTeam when a team card is clicked', () => {
     const onSelectTeam = vi.fn();
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={onSelectTeam} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={onSelectTeam} />);
     fireEvent.click(screen.getByText('Team Alpha'));
     expect(onSelectTeam).toHaveBeenCalledWith(TEAMS[0]);
   });
 
   test('filters teams by name query', () => {
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
     fireEvent.change(screen.getByPlaceholderText('Find team or ECU…'), {
       target: { value: 'Alpha' },
     });
@@ -53,43 +55,32 @@ describe('Sidebar — team mode', () => {
   });
 
   test('shows no-results message when search matches nothing', () => {
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
     fireEvent.change(screen.getByPlaceholderText('Find team or ECU…'), {
       target: { value: 'zzz' },
     });
     expect(screen.getByText(/No results for/)).toBeInTheDocument();
   });
-
-  test('shows add-team button when onCreateTeam is provided', () => {
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} onCreateTeam={noop} />);
-    expect(screen.getByTitle('Add team')).toBeInTheDocument();
-  });
-
-  test('calls onCreateTeam when add button is clicked', () => {
-    const onCreateTeam = vi.fn();
-    render(<Sidebar teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} onCreateTeam={onCreateTeam} />);
-    fireEvent.click(screen.getByTitle('Add team'));
-    expect(onCreateTeam).toHaveBeenCalledOnce();
-  });
 });
 
-describe('Sidebar — ECU-only mode (no teams prop)', () => {
-  test('renders ECU items when teams is not provided', () => {
-    render(<Sidebar ecuList={ECUS} onSelectTeam={noop} />);
-    expect(screen.getByText('Team 1')).toBeInTheDocument();
+describe('Sidebar — events mode', () => {
+  test('renders event items when no event is selected', () => {
+    const events = [{ id: 1, event_type: 'drag_race' }, { id: 2, event_type: 'gymkhana' }];
+    render(<Sidebar events={events} selectedEvent={null} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    expect(screen.getByText('Drag Race')).toBeInTheDocument();
+    expect(screen.getByText('Gymkhana')).toBeInTheDocument();
   });
 
-  test('shows empty state when no ECUs registered', () => {
-    render(<Sidebar ecuList={[]} onSelectTeam={noop} />);
-    expect(screen.getByText('No ECUs registered')).toBeInTheDocument();
+  test('shows empty state when no events exist', () => {
+    render(<Sidebar events={[]} selectedEvent={null} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    expect(screen.getByText('No events in this competition')).toBeInTheDocument();
   });
 
-  test('filters ECUs by team number query', () => {
-    render(<Sidebar ecuList={ECUS} onSelectTeam={noop} />);
-    fireEvent.change(screen.getByPlaceholderText('Find ECU or Team…'), {
-      target: { value: 'team 1' },
-    });
-    expect(screen.getByText('Team 1')).toBeInTheDocument();
-    expect(screen.queryByText('Team 2')).not.toBeInTheDocument();
+  test('calls onSelectEvent when an event is clicked', () => {
+    const onSelectEvent = vi.fn();
+    const events = [{ id: 1, event_type: 'drag_race' }];
+    render(<Sidebar events={events} selectedEvent={null} onSelectEvent={onSelectEvent} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    fireEvent.click(screen.getByText('Drag Race'));
+    expect(onSelectEvent).toHaveBeenCalledWith(events[0]);
   });
 });
