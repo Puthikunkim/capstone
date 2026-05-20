@@ -280,6 +280,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     team_number: "",
     vehicle_class: "",
     vehicle_type: "",
+    power_limit_watts: "",
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState(null);
@@ -319,6 +320,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           team_number: ecu.team_number ?? "",
           vehicle_class: ecu.vehicle_class ?? "",
           vehicle_type: ecu.vehicle_type ?? "",
+          power_limit_watts: ecu.power_limit_watts ?? "",
         });
       })
       .catch(() => setEcuData(null));
@@ -359,7 +361,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           if (sorted.length > 0) lastFrameTsRef.current = sorted[sorted.length - 1].timestamp;
           const expanded = expandFrames(sorted);
           setHistoryPoints(expanded);
-          setChartData(expanded);
+          setChartData(expanded.slice(-200));
         })
         .catch(() => {});
     } else {
@@ -372,7 +374,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           const sortedLive = [...liveFrames].sort(sortFn);
           const sortedAll = [...allFrames].sort(sortFn);
           if (sortedLive.length > 0) lastFrameTsRef.current = sortedLive[sortedLive.length - 1].timestamp;
-          setChartData(expandFrames(sortedLive));
+          setChartData(expandFrames(sortedLive).slice(-200));
           setHistoryPoints(expandFrames(sortedAll));
         })
         .catch(() => {});
@@ -396,7 +398,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
-    setChartData((prev) => [...prev, ...newPoints]);
+    setChartData((prev) => {
+      const next = [...prev, ...newPoints];
+      return next.length > 200 ? next.slice(-200) : next;
+    });
     setHistoryPoints((prev) => [...prev, ...newPoints]);
   }, [liveData]);
 
@@ -421,6 +426,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
         if (configForm.vehicle_class) payload.vehicle_class = configForm.vehicle_class;
         if (configForm.vehicle_type)  payload.vehicle_type  = configForm.vehicle_type;
         if (configForm.team_number !== "") payload.team_number = Number(configForm.team_number);
+        if (configForm.power_limit_watts !== "") payload.power_limit_watts = Number(configForm.power_limit_watts);
         const updated = await configureEcu(selectedEcuId, payload);
         setEcuData(updated);
         setConfigSuccess(true);
@@ -805,6 +811,21 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
                   onChange={handleConfigChange}
                   className="form-input"
                   min="0"
+                />
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-field">
+                <label>Power Limit (W)</label>
+                <input
+                  type="number"
+                  name="power_limit_watts"
+                  value={configForm.power_limit_watts}
+                  onChange={handleConfigChange}
+                  className="form-input"
+                  min="1"
+                  step="any"
+                  placeholder="e.g. 350"
                 />
               </div>
             </div>
