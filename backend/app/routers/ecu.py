@@ -45,9 +45,10 @@ def get_ecu_history(
     start: datetime | None = None,
     end: datetime | None = None,
     limit: int | None = None,
+    team_id: int | None = None,
     db: Session = Depends(get_db),
 ):
     ecu = get_ecu(db, ecu_id)
     if ecu is None:
         raise HTTPException(status_code=404, detail="ECU not found")
-    return get_frames(db, ecu_id, start=start, end=end, limit=limit)
+    return get_frames(db, ecu_id, start=start, end=end, limit=limit, team_id=team_id)

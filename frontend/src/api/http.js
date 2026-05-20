@@ -16,8 +16,21 @@ export const fetchEcus = () => request("/ecu");
 
 export const fetchEcu = (ecuId) => request(`/ecu/${ecuId}`);
 
-export const fetchEcuHistory = (ecuId, limit = 100) =>
-  request(`/ecu/${ecuId}/history?limit=${limit}`);
+export const fetchEcuHistory = (ecuId, { limit, teamId } = {}) => {
+  const p = new URLSearchParams();
+  if (limit != null) p.set("limit", limit);
+  if (teamId != null) p.set("team_id", teamId);
+  const qs = p.toString();
+  return request(`/ecu/${ecuId}/history${qs ? `?${qs}` : ""}`);
+};
+
+export const fetchTeamFrames = (teamId, { eventId, limit } = {}) => {
+  const p = new URLSearchParams();
+  if (eventId != null) p.set("event_id", eventId);
+  if (limit != null) p.set("limit", limit);
+  const qs = p.toString();
+  return request(`/teams/${teamId}/frames${qs ? `?${qs}` : ""}`);
+};
 
 export const configureEcu = (ecuId, config) =>
   request(`/ecu/${ecuId}/configure`, {

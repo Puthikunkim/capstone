@@ -177,9 +177,12 @@ def get_frames(
 	start: datetime | None = None,
 	end: datetime | None = None,
 	limit: int | None = 100,
+	team_id: int | None = None,
 ) -> list[EnergyFrame]:
 	stmt: Select[tuple[EnergyFrame]] = select(EnergyFrame).where(EnergyFrame.ecu_id == ecu_id)
 
+	if team_id is not None:
+		stmt = stmt.where(EnergyFrame.team_id == team_id)
 	if start is not None:
 		stmt = stmt.where(EnergyFrame.timestamp >= _to_utc(start))
 	if end is not None:
@@ -233,9 +236,14 @@ def get_frames_for_team(
 	event_id: int | None = None,
 	limit: int | None = 100,
 ) -> list[EnergyFrame]:
+	# Include frames that have team_id set, plus frames from ECUs currently
+	# assigned to this team (handles frames stored before ECU assignment).
+	ecu_ids = list(db.scalars(select(ECU.id).where(ECU.team_id == team_id)).all())
 	stmt: Select[tuple[EnergyFrame]] = (
 		select(EnergyFrame)
-		.where(EnergyFrame.team_id == team_id)
+		.where(
+			(EnergyFrame.team_id == team_id) | (EnergyFrame.ecu_id.in_(ecu_ids))
+		)
 		.order_by(EnergyFrame.timestamp.asc())
 	)
 

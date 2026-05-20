@@ -1,15 +1,46 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
 import { TelemetryChart, HistoryChart } from "../components/TelemetryChart";
-import { useWebSocket } from "../hooks/useWebSocket";
+import { useTeamWebSocket } from "../hooks/useWebSocket";
 import {
   fetchEcu,
   fetchEcuHistory,
+  fetchTeamFrames,
   fetchViolations,
   configureEcu,
   uploadFirmware,
   fetchFirmwareStatus,
 } from "../api/http";
+
+// Expand a single frame's samples into individual time-stamped points.
+// The last sample gets the frame's timestamp; earlier samples are spread
+// back toward prevTimestamp (or bunched at the frame timestamp if unknown).
+function expandSingleFrame(frame, prevTimestamp) {
+  const voltages = frame.voltage_samples ?? [];
+  const currents = frame.current_samples ?? [];
+  const n = Math.max(voltages.length, currents.length);
+  if (n === 0) return [];
+
+  const tEnd = new Date(frame.timestamp).getTime();
+  const tStart = prevTimestamp ? new Date(prevTimestamp).getTime() : tEnd;
+
+  return Array.from({ length: n }, (_, j) => ({
+    timestamp: new Date(n === 1 ? tEnd : tStart + ((j + 1) / n) * (tEnd - tStart)).toISOString(),
+    voltage: voltages[j] ?? null,
+    current: currents[j] ?? null,
+    // carry energy on the last sample of each frame so stat cards can display it
+    energy: j === n - 1 ? (frame.energy ?? null) : undefined,
+  }));
+}
+
+// Expand a sorted array of frames into individual sample points.
+function expandFrames(frames) {
+  const points = [];
+  for (let i = 0; i < frames.length; i++) {
+    points.push(...expandSingleFrame(frames[i], i > 0 ? frames[i - 1].timestamp : null));
+  }
+  return points;
+}
 
 // ── Small UI helpers ──────────────────────────────────────────────────
 
@@ -95,13 +126,13 @@ function toLocalInput(utcIso) {
 
 function EventTimingCard({ participant, onSave }) {
   const [startInput, setStartInput] = useState("");
-  const [durationMin, setDurationMin] = useState("");
+  const [durationSec, setDurationSec] = useState("");
   const [saving, setSaving] = useState(false);
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
     setStartInput(participant?.start ? toLocalInput(participant.start) : "");
-    setDurationMin(participant?.duration_seconds != null ? String(participant.duration_seconds / 60) : "");
+    setDurationSec(participant?.duration_seconds != null ? String(participant.duration_seconds) : "");
   }, [participant]);
 
   useEffect(() => {
@@ -115,7 +146,7 @@ function EventTimingCard({ participant, onSave }) {
     try {
       await onSave({
         start: startInput ? new Date(startInput).toISOString() : null,
-        duration_seconds: durationMin ? Number(durationMin) * 60 : null,
+        duration_seconds: durationSec ? Number(durationSec) : null,
       });
     } finally {
       setSaving(false);
@@ -123,7 +154,7 @@ function EventTimingCard({ participant, onSave }) {
   };
 
   const start = startInput ? new Date(startInput) : null;
-  const durationMs = durationMin ? Number(durationMin) * 60000 : null;
+  const durationMs = durationSec ? Number(durationSec) * 1000 : null;
   const end = start && durationMs ? new Date(start.getTime() + durationMs) : null;
 
   let status = null;
@@ -139,7 +170,7 @@ function EventTimingCard({ participant, onSave }) {
       status = "upcoming";
     } else if (now <= end) {
       const elapsed = (now - start) / 1000;
-      const total = Number(durationMin) * 60;
+      const total = Number(durationSec);
       const remaining = Math.round(total - elapsed);
       const m = Math.floor(remaining / 60);
       const s = remaining % 60;
@@ -175,15 +206,15 @@ function EventTimingCard({ participant, onSave }) {
           />
         </div>
         <div className="form-field">
-          <label>Duration (min)</label>
+          <label>Duration (sec)</label>
           <input
             type="number"
             className="form-input"
-            value={durationMin}
+            value={durationSec}
             min="1"
-            placeholder="e.g. 30"
+            placeholder="e.g. 1800"
             disabled={!participant}
-            onChange={(e) => setDurationMin(e.target.value)}
+            onChange={(e) => setDurationSec(e.target.value)}
           />
         </div>
       </div>
@@ -234,14 +265,15 @@ function useSessionTimer(active) {
 
 // ── Dashboard ────────────────────────────────────────────────────────
 
-export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam, onUnassign, participant, onSaveParticipant }) {
+export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCreateTeam, onUnassign, participant, onSaveParticipant }) {
   const [ecuData, setEcuData] = useState(null);
-  const [chartData, setChartData] = useState([]);
-  const [historyData, setHistoryData] = useState([]);
+  const [chartData, setChartData] = useState([]);      // live sample points (capped)
+  const [historyPoints, setHistoryPoints] = useState([]); // all historical sample points
   const [violations, setViolations] = useState([]);
   const [monitoring, setMonitoring] = useState(true);
   const [voltageView, setVoltageView] = useState("live");
   const [currentView, setCurrentView] = useState("live");
+  const lastFrameTsRef = useRef(null); // timestamp of the last received frame
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -261,24 +293,18 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
   const [firmwareError, setFirmwareError] = useState(null);
   const firmwareInputRef = useRef(null);
 
-  const activeEcuId = monitoring ? selectedEcuId : null;
-  const { isConnected, liveData } = useWebSocket(activeEcuId);
+  const activeTeamId = monitoring ? teamId : null;
+  const { isConnected, liveData } = useTeamWebSocket(activeTeamId);
   const sessionTime = useSessionTimer(isConnected);
 
-  // Fetch ECU details + violations when ECU changes
+  // Fetch ECU config + violations when the selected ECU changes
   useEffect(() => {
     if (!selectedEcuId) {
       setEcuData(null);
-      setChartData([]);
       setViolations([]);
       return;
     }
 
-    setChartData([]);
-    setHistoryData([]);
-    setViolations([]);
-    setVoltageView("live");
-    setCurrentView("live");
     setConfigError(null);
     setConfigSuccess(false);
     setFirmwareStatus(null);
@@ -297,14 +323,6 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
       })
       .catch(() => setEcuData(null));
 
-    fetchEcuHistory(selectedEcuId, 10000)
-      .then((history) => {
-        const sorted = [...history].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-        setHistoryData(sorted);
-        setChartData(sorted.slice(-100));
-      })
-      .catch(() => {});
-
     fetchViolations(selectedEcuId)
       .then(setViolations)
       .catch(() => setViolations([]));
@@ -313,6 +331,53 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
       .then(setFirmwareStatus)
       .catch(() => {});
   }, [selectedEcuId]);
+
+  // Fetch chart data when ECU/team/participant timing changes
+  useEffect(() => {
+    if (!teamId || !selectedEcuId) {
+      setChartData([]);
+      setHistoryPoints([]);
+      lastFrameTsRef.current = null;
+      setVoltageView("live");
+      setCurrentView("live");
+      return;
+    }
+
+    setChartData([]);
+    setHistoryPoints([]);
+    lastFrameTsRef.current = null;
+    setVoltageView("live");
+    setCurrentView("live");
+
+    const hasTimeRange = participant?.start != null && participant?.duration_seconds != null;
+
+    if (hasTimeRange) {
+      // Start+duration set: show team frames within the event time window
+      fetchTeamFrames(teamId, { eventId: participant.event_id, limit: 10000 })
+        .then((frames) => {
+          const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          if (sorted.length > 0) lastFrameTsRef.current = sorted[sorted.length - 1].timestamp;
+          const expanded = expandFrames(sorted);
+          setHistoryPoints(expanded);
+          setChartData(expanded);
+        })
+        .catch(() => {});
+    } else {
+      // No timing: live chart seeds from last 100 ECU frames, history shows all ECU frames
+      const livePromise = fetchEcuHistory(selectedEcuId, { limit: 100, teamId });
+      const historyPromise = fetchEcuHistory(selectedEcuId, { teamId });
+      Promise.all([livePromise, historyPromise])
+        .then(([liveFrames, allFrames]) => {
+          const sortFn = (a, b) => new Date(a.timestamp) - new Date(b.timestamp);
+          const sortedLive = [...liveFrames].sort(sortFn);
+          const sortedAll = [...allFrames].sort(sortFn);
+          if (sortedLive.length > 0) lastFrameTsRef.current = sortedLive[sortedLive.length - 1].timestamp;
+          setChartData(expandFrames(sortedLive));
+          setHistoryPoints(expandFrames(sortedAll));
+        })
+        .catch(() => {});
+    }
+  }, [teamId, selectedEcuId, participant?.start, participant?.duration_seconds]);
 
   // Refresh ECU metadata (temp, flash) every 5 seconds while connected
   useEffect(() => {
@@ -325,16 +390,14 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
     return () => clearInterval(id);
   }, [selectedEcuId, isConnected]);
 
-  // Append live frames to chart, cap at 500 to prevent unbounded growth
-  const MAX_CHART_POINTS = 500;
+  // Expand incoming live frame into sample points and append to charts
   useEffect(() => {
-    if (liveData) {
-      setChartData((prev) => {
-        const next = [...prev, liveData];
-        return next.length > MAX_CHART_POINTS ? next.slice(-MAX_CHART_POINTS) : next;
-      });
-      setHistoryData((prev) => [...prev, liveData]);
-    }
+    if (!liveData) return;
+    const prevTs = lastFrameTsRef.current;
+    lastFrameTsRef.current = liveData.timestamp;
+    const newPoints = expandSingleFrame(liveData, prevTs);
+    setChartData((prev) => [...prev, ...newPoints]);
+    setHistoryPoints((prev) => [...prev, ...newPoints]);
   }, [liveData]);
 
   // ── Config form ──────────────────────────────────────────────────
@@ -453,7 +516,7 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
 
   const classLabel = ecuData?.vehicle_class ?? "--";
 
-  const lastFrame = liveData ?? (chartData.length > 0 ? chartData[chartData.length - 1] : null);
+  const lastSample = chartData.length > 0 ? chartData[chartData.length - 1] : null;
 
   // Flash display — show raw KB value, or "--" if unknown
   const flashDisplay = ecuData?.flash_usage != null
@@ -532,10 +595,10 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             </svg>
           }
           label="Voltage"
-          value={lastFrame?.avg_voltage?.toFixed(1)}
+          value={lastSample?.voltage?.toFixed(1)}
           unit="V"
-          sub={lastFrame ? <><span className="stable-dot" /> Stable</> : "No data"}
-          subStyle={lastFrame ? "sub-stable" : "sub-muted"}
+          sub={lastSample ? <><span className="stable-dot" /> Stable</> : "No data"}
+          subStyle={lastSample ? "sub-stable" : "sub-muted"}
         />
         <StatCard
           icon={
@@ -545,10 +608,10 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             </svg>
           }
           label="Current"
-          value={lastFrame?.avg_current?.toFixed(1)}
+          value={lastSample?.current?.toFixed(1)}
           unit="A"
-          sub={lastFrame ? "Bi-directional" : "No data"}
-          subStyle={lastFrame ? "sub-muted" : "sub-muted"}
+          sub={lastSample ? "Bi-directional" : "No data"}
+          subStyle="sub-muted"
         />
         <StatCard
           icon={
@@ -559,14 +622,14 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
           }
           label="Power"
           value={
-            lastFrame?.avg_voltage != null && lastFrame?.avg_current != null
-              ? (lastFrame.avg_voltage * lastFrame.avg_current).toFixed(1)
+            lastSample?.voltage != null && lastSample?.current != null
+              ? (lastSample.voltage * lastSample.current).toFixed(1)
               : null
           }
           unit="W"
           sub={
-            lastFrame?.avg_voltage != null && lastFrame?.avg_current != null
-              ? (lastFrame.avg_voltage * lastFrame.avg_current) >= 0 ? "Discharging" : "Charging"
+            lastSample?.voltage != null && lastSample?.current != null
+              ? (lastSample.voltage * lastSample.current) >= 0 ? "Discharging" : "Charging"
               : "No data"
           }
           subStyle="sub-muted"
@@ -580,13 +643,9 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             </svg>
           }
           label="Energy"
-          value={lastFrame?.energy != null ? lastFrame.energy.toFixed(1) : null}
+          value={lastSample?.energy != null ? lastSample.energy.toFixed(1) : null}
           unit="Wh"
-          sub={
-            chartData.length > 0
-              ? `${(chartData.reduce((s, f) => s + (f.energy ?? 0), 0) / chartData.length).toFixed(2)} Wh / Frame avg`
-              : "No data"
-          }
+          sub={lastSample?.energy != null ? "Latest frame" : "No data"}
           subStyle="sub-muted"
         />
       </div>
@@ -620,7 +679,7 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             ) : (
               <TelemetryChart
                 data={chartData}
-                dataKey="avg_voltage"
+                dataKey="voltage"
                 color="#00c6ff"
                 unit="V"
                 label="Voltage"
@@ -628,8 +687,8 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             )
           ) : (
             <HistoryChart
-              data={historyData}
-              dataKey="avg_voltage"
+              data={historyPoints}
+              dataKey="voltage"
               color="#00c6ff"
               unit="V"
               label="Voltage"
@@ -664,7 +723,7 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             ) : (
               <TelemetryChart
                 data={chartData}
-                dataKey="avg_current"
+                dataKey="current"
                 color="#f59e0b"
                 unit="A"
                 label="Current"
@@ -672,8 +731,8 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
             )
           ) : (
             <HistoryChart
-              data={historyData}
-              dataKey="avg_current"
+              data={historyPoints}
+              dataKey="current"
               color="#f59e0b"
               unit="A"
               label="Current"
@@ -877,6 +936,7 @@ export function Dashboard({ selectedEcuId, backendError, teamName, onCreateTeam,
 
 Dashboard.propTypes = {
   selectedEcuId: PropTypes.number,
+  teamId: PropTypes.number,
   backendError: PropTypes.bool,
   teamName: PropTypes.string,
   onCreateTeam: PropTypes.func,

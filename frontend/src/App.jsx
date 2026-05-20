@@ -284,6 +284,7 @@ export default function App() {
           ) : (
             <Dashboard
               selectedEcuId={selectedEcuId}
+              teamId={resolvedTeam?.id ?? null}
               backendError={backendError}
               teamName={resolvedTeam?.name ?? null}
               onUnassign={
