@@ -12,10 +12,10 @@ function TeamCard({ team, ecu }) {
     <div className="ct-team-card">
       <div className="ct-team-top">
         <span className="ct-team-name">{team.name}</span>
-        {ecu && <div className={`ecu-dot ${status.cls}`} />}
+        {ecu && <div className={`ecu-dot ${status.cls}`} aria-label={status.label} />}
       </div>
       <div className="ct-team-meta">
-        {team.vehicle_class} Class · {team.vehicle_type.charAt(0).toUpperCase() + team.vehicle_type.slice(1)}
+        {team.vehicle_class} Class · {team.vehicle_type?.charAt(0).toUpperCase() + (team.vehicle_type?.slice(1) ?? "")}
       </div>
       {ecu ? (
         <div className="ct-team-ecu">ECU #{ecu.serial_number}</div>

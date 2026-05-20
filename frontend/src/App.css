@@ -970,7 +970,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 10px;
+  padding: 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   margin-bottom: 6px;
@@ -1179,14 +1179,14 @@ body {
 .add-team-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .add-team-meta { font-size: 11px; color: var(--text-muted); }
 
-.add-team-btn {
-  padding: 5px 12px !important;
-  font-size: 12px !important;
+.modal .add-team-btn {
+  padding: 5px 12px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
-.add-team-footer {
-  justify-content: space-between !important;
+.modal .add-team-footer {
+  justify-content: space-between;
 }
 
 /* ── Competition detail: teams header with add button ─────────────── */

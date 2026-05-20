@@ -17,6 +17,7 @@ from app.services.competitions import (
 )
 from app.services.teams import (
     TeamAlreadyInCompetitionError,
+    TeamInDifferentCompetitionError,
     add_team_to_competition,
     get_team,
     list_teams_by_competition,
@@ -64,5 +65,5 @@ def add_team_to_competition_entry(competition_id: int, team_id: int, db: Session
         raise HTTPException(status_code=404, detail="Team not found")
     try:
         return add_team_to_competition(db, team, competition_id)
-    except TeamAlreadyInCompetitionError as exc:
+    except (TeamAlreadyInCompetitionError, TeamInDifferentCompetitionError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

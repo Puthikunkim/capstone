@@ -248,7 +248,7 @@ export default function App() {
       <div className="app-body">
         {!backendError && (
           <Sidebar
-            events={selectedCompetition.events ?? []}
+            events={selectedCompetition?.events ?? []}
             selectedEvent={selectedEvent}
             onSelectEvent={handleSelectEvent}
             teams={eventTeams}

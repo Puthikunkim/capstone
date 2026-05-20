@@ -182,7 +182,9 @@ def get_frames(
 	stmt: Select[tuple[EnergyFrame]] = select(EnergyFrame).where(EnergyFrame.ecu_id == ecu_id)
 
 	if team_id is not None:
-		stmt = stmt.where(EnergyFrame.team_id == team_id)
+		stmt = stmt.where(
+			(EnergyFrame.team_id == team_id) | (EnergyFrame.team_id.is_(None))
+		)
 	if start is not None:
 		stmt = stmt.where(EnergyFrame.timestamp >= _to_utc(start))
 	if end is not None:

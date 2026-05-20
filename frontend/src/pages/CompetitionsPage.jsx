@@ -270,7 +270,7 @@ function TeamGlobalCard({ team, competitions }) {
     <div className="team-global-card">
       <div className="team-global-name">{team.name}</div>
       <div className="team-global-meta">
-        {team.vehicle_class} Class · {team.vehicle_type.charAt(0).toUpperCase() + team.vehicle_type.slice(1)}
+        {team.vehicle_class} Class · {team.vehicle_type?.charAt(0).toUpperCase() + (team.vehicle_type?.slice(1) ?? "")}
       </div>
       <div className={`team-global-comp ${competition ? "" : "unassigned"}`}>
         {competition ? competition.name : "No competition"}

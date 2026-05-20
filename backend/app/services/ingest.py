@@ -35,6 +35,8 @@ async def persist_and_broadcast_frame(db: Session, processed: dict[str, Any]) ->
 
     if frame.team_id is not None:
         team_channel = f"team_{frame.team_id}"
+        team_subs = len(manager._channels.get(team_channel, set()))
+        logger.info("Broadcasting to channel=%s  subscribers=%d", team_channel, team_subs)
         await manager.notify(team_channel, frame_data)
 
     return frame, True
