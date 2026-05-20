@@ -256,7 +256,7 @@ static void add_peer(const uint8_t *mac) {
 ---------------------------------------------------------------*/
 
 static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, uint32_t rx_time_ms) {
-    char buf[600];
+    static char buf[6144]; /* static: BSS, not stack; safe because uart_mutex serializes callers */
     char ts[27];
     int pos = 0;
 
