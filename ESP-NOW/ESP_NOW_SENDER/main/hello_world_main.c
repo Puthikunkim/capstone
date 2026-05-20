@@ -14,6 +14,8 @@
 #include "esp_adc/adc_cali_scheme.h"
 
 #include <time.h>
+#include "esp_spiffs.h"
+#include "nvs.h"
 
 static const char *TAG = "SENDER";
 
@@ -22,7 +24,7 @@ static const char *TAG = "SENDER";
 #define ADC_CURRENT_CHANNEL   ADC_CHANNEL_6
 #define ADC_VOLTAGE_CHANNEL   ADC_CHANNEL_7
 #define SAMPLES_PER_FRAME     10
-#define MAX_FRAMES_PER_PKT    3
+#define MAX_FRAMES_PER_PKT    31
 #define SENDER_BUFFER_SIZE    3000
 #define ACK_TIMEOUT_MS        200
 
@@ -104,6 +106,12 @@ static uint16_t disconnect_first_frame = 0;
 static uint8_t  consecutive_timeouts   = 0;
 #define DISCONNECT_THRESHOLD  3
 
+// ====== Flash persistence ======
+#define FLASH_FILE           "/spiffs/frames.bin"
+#define FLASH_NVS_NS         "sender_state"
+#define FLASH_KEY_CONF_FLOOR "conf_floor"
+#define FLASH_KEY_BASE_CTR   "base_ctr"
+
 // ====== Time sync state ======
 // sync_base_us precomputed once at WELCOME so the hot path in
 // compute_frame_timestamp never calls strptime/mktime again.
@@ -135,6 +143,11 @@ static raw_sample_t sample_ring[SAMPLE_RING_SIZE];
 static volatile uint16_t ring_write = 0;
 static volatile uint16_t ring_read  = 0;
 static SemaphoreHandle_t ring_mutex;
+
+static FILE            *flash_fp       = NULL;
+static uint16_t         flash_base_ctr = 0;
+static nvs_handle_t     flash_nvs;
+static SemaphoreHandle_t flash_mutex;
 
 
 /*---------------------------------------------------------------
@@ -169,6 +182,91 @@ static void compute_frame_timestamp(int64_t frame_boot_us,
              "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
              final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
              final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
+}
+
+/*---------------------------------------------------------------
+    Flash persistence
+---------------------------------------------------------------*/
+
+static void flash_save_frame(const buffered_frame_t *f) {
+    if (!flash_fp) return;
+    xSemaphoreTake(flash_mutex, portMAX_DELAY);
+    fwrite(f, sizeof(buffered_frame_t), 1, flash_fp);
+    if (f->counter % 10 == 0)
+        fflush(flash_fp);
+    xSemaphoreGive(flash_mutex);
+}
+
+static void flash_update_floor(uint16_t floor) {
+    xSemaphoreTake(flash_mutex, portMAX_DELAY);
+    nvs_set_u16(flash_nvs, FLASH_KEY_CONF_FLOOR, floor);
+    nvs_commit(flash_nvs);
+    // All frames confirmed: clear the file to reclaim space
+    if (floor == (uint16_t)(next_counter - 1) && flash_fp) {
+        fclose(flash_fp);
+        remove(FLASH_FILE);
+        flash_fp = fopen(FLASH_FILE, "ab");
+        flash_base_ctr = next_counter;
+        nvs_set_u16(flash_nvs, FLASH_KEY_BASE_CTR, flash_base_ctr);
+        nvs_commit(flash_nvs);
+        ESP_LOGI(TAG, "Flash: fully confirmed, file reset (base=%d)", flash_base_ctr);
+    }
+    xSemaphoreGive(flash_mutex);
+}
+
+// Called once at boot (after nvs_flash_init via wifi_init).
+// Mounts SPIFFS, restores ring buffer from flash, then opens log for append.
+static void flash_init(void) {
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path              = "/spiffs",
+        .partition_label        = NULL,
+        .max_files              = 3,
+        .format_if_mount_failed = true,
+    };
+    if (esp_vfs_spiffs_register(&conf) != ESP_OK) {
+        ESP_LOGE(TAG, "SPIFFS mount failed — flash persistence disabled");
+        return;
+    }
+    if (nvs_open(FLASH_NVS_NS, NVS_READWRITE, &flash_nvs) != ESP_OK) {
+        ESP_LOGE(TAG, "NVS open failed — flash persistence disabled");
+        return;
+    }
+
+    uint16_t saved_floor = 0;
+    nvs_get_u16(flash_nvs, FLASH_KEY_CONF_FLOOR, &saved_floor);
+    nvs_get_u16(flash_nvs, FLASH_KEY_BASE_CTR,   &flash_base_ctr);
+
+    // Load unconfirmed frames back into the ring buffer
+    FILE *f = fopen(FLASH_FILE, "rb");
+    if (f) {
+        buffered_frame_t frame;
+        uint16_t max_ctr = saved_floor;
+        uint16_t loaded  = 0;
+        while (fread(&frame, sizeof(buffered_frame_t), 1, f) == 1) {
+            if ((int16_t)(frame.counter - saved_floor) > 0) {
+                send_buffer[frame.counter % SENDER_BUFFER_SIZE] = frame;
+                if ((int16_t)(frame.counter - max_ctr) > 0)
+                    max_ctr = frame.counter;
+                loaded++;
+            }
+        }
+        fclose(f);
+        if (loaded > 0) {
+            confirmed_floor = saved_floor;
+            next_counter    = max_ctr + 1;
+            ESP_LOGI(TAG, "Restored %d frames from flash (floor=%d  next=%d)",
+                     loaded, confirmed_floor, next_counter);
+        }
+    }
+
+    flash_fp = fopen(FLASH_FILE, "ab");
+    if (!flash_fp) {
+        ESP_LOGE(TAG, "Failed to open flash log for append");
+        return;
+    }
+    size_t total = 0, used = 0;
+    esp_spiffs_info(NULL, &total, &used);
+    ESP_LOGI(TAG, "Flash ready — SPIFFS %u / %u bytes used", used, total);
 }
 
 /*---------------------------------------------------------------
@@ -218,12 +316,14 @@ static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
     if ((next_counter - confirmed_floor) >= SENDER_BUFFER_SIZE)
         confirmed_floor = next_counter - SENDER_BUFFER_SIZE + 1;
 
+    flash_save_frame(f);
     next_counter++;
 }
 
 static void buffer_clear_acked(uint16_t floor) {
     confirmed_floor      = floor;
     consecutive_timeouts = 0;
+    flash_update_floor(floor);
 
     if (is_disconnected) {
         is_disconnected = false;
@@ -557,7 +657,8 @@ void sender_task(void *arg) {
                                  pkt.frames[count - 1].counter,
                                  ts);
                     }
-                    esp_now_send(controller_mac, (uint8_t *)&pkt, sizeof(pkt));
+                    esp_now_send(controller_mac, (uint8_t *)&pkt,
+                                 2 + count * sizeof(adc_frame_t));
                     waiting_ack    = true;
                     last_send_time = now;
                 }
@@ -635,14 +736,16 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
 
-    wifi_init();
+    wifi_init();   // initialises NVS via nvs_flash_init()
     adc_init();
+    flash_init();  // mount SPIFFS and restore buffered frames from previous session
 
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
-    ring_mutex = xSemaphoreCreateMutex();
+    ring_mutex  = xSemaphoreCreateMutex();
+    flash_mutex = xSemaphoreCreateMutex();
     esp_now_register_send_cb(on_data_sent);
     esp_now_register_recv_cb(on_data_recv);
 

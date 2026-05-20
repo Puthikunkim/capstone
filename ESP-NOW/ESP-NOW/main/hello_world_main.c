@@ -25,7 +25,7 @@ static const char *TAG = "CONTROLLER";
 #define DISCONNECT_TIMEOUT_US 300000000LL
 #define MAX_NODES             20
 #define SAMPLES_PER_FRAME     10
-#define MAX_FRAMES_PER_PKT    3
+#define MAX_FRAMES_PER_PKT    31
 
 #define TIME_REQUEST_STR      "TIME_REQUEST\n"
 #define TIME_RESPONSE_BUF_LEN 128
@@ -401,7 +401,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     }
 
     // ── DATA: ADC frame ──
-    if (msg_type == MSG_DATA && len == sizeof(adc_packet_t)) {
+    if (msg_type == MSG_DATA && len >= 2) {
         const adc_packet_t *pkt = (const adc_packet_t *)data;
         uint32_t rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
@@ -521,12 +521,12 @@ void app_main(void) {
 
     uart_mutex = xSemaphoreCreateMutex();
 
-    request_time_from_backend();
-
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
+    request_time_from_backend();
+
     esp_now_register_recv_cb(on_data_recv);
 
     xTaskCreate(hello_task,         "hello",        2048, NULL, 3, NULL);
