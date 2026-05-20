@@ -21,6 +21,7 @@ import json
 import logging
 import queue
 import threading
+import time
 from datetime import datetime, timezone
 
 import serial
@@ -227,40 +228,50 @@ async def process_frames(queue: asyncio.Queue) -> None:
 
 def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
     """Runs entirely in a background thread. Puts parsed frames onto out."""
-    logger.info("Opening %s at %d baud", port, baud)
-    try:
-        ser = serial.Serial(port, baud, timeout=1)
-    except serial.SerialException as exc:
-        logger.error("Failed to open port: %s", exc)
-        out.put(None)  # sentinel to signal failure
-        return
+    while True:
+        ser = None
+        while ser is None:
+            try:
+                logger.info("Opening %s at %d baud", port, baud)
+                ser = serial.Serial(port, baud, timeout=1)
+            except serial.SerialException:
+                logger.info("Port %s not available, retrying in 3s...", port)
+                time.sleep(3)
 
-    if not handle_time_sync(ser):
-        logger.warning("Time sync failed — ECU timestamps will be epoch")
+        if not handle_time_sync(ser):
+            logger.warning("Time sync failed — ECU timestamps will be epoch")
 
-    logger.info("Listening for JSON packets...")
-    try:
-        while True:
-            line = _read_line(ser)
-            if not line:
-                continue
-            if not line.startswith('{'):
-                logger.debug("Ignoring non-JSON line: %r", line[:80])
-                continue
-            if '"power_limit_request"' in line:
-                handle_power_limit_request(ser, line)
-                continue
-            packet = parse_packet(line)
-            if packet is None:
-                continue
-            for frame in packet["frames"]:
-                frame["sender_id"] = packet["sender_id"]
-                out.put(frame)
-    except Exception as exc:
-        logger.error("Serial thread error: %s", exc)
-    finally:
-        ser.close()
-        out.put(None)  # sentinel
+        logger.info("Listening for JSON packets...")
+        try:
+            while True:
+                line = _read_line(ser)
+                if not line:
+                    continue
+                if not line.startswith('{'):
+                    if 'TIME_REQUEST' in line:
+                        now = datetime.now(timezone.utc)
+                        ts = now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond:06d}'
+                        response = json.dumps({"timestamp": ts}) + '\n'
+                        ser.write(response.encode('ascii'))
+                        ser.flush()
+                        logger.info("Time sync sent: %s", ts)
+                    else:
+                        logger.debug("Ignoring non-JSON line: %r", line[:80])
+                    continue
+                if '"power_limit_request"' in line:
+                    handle_power_limit_request(ser, line)
+                    continue
+                packet = parse_packet(line)
+                if packet is None:
+                    continue
+                for frame in packet["frames"]:
+                    frame["sender_id"] = packet["sender_id"]
+                    out.put(frame)
+        except Exception as exc:
+            logger.error("Serial thread error: %s", exc)
+        finally:
+            ser.close()
+            logger.info("Port closed, reconnecting...")
 
 
 async def run(port: str, baud: int) -> None:
