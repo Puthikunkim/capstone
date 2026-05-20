@@ -71,7 +71,16 @@ describe('fetchEcuHistory', () => {
     mockOkResponse([]);
     await fetchEcuHistory(7);
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/ecu/7/history?limit=100',
+      'http://localhost:8000/api/ecu/7/history',
+      expect.anything()
+    );
+  });
+
+  test('appends limit and teamId query params when provided', async () => {
+    mockOkResponse([]);
+    await fetchEcuHistory(7, { limit: 100, teamId: 3 });
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/ecu/7/history?limit=100&team_id=3',
       expect.anything()
     );
   });
