@@ -36,7 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 SAMPLES = 10
-MAX_FRAMES = 3
+MAX_FRAMES = 31
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ def handle_power_limit_request(ser: serial.Serial, line: str) -> None:
 
 def handle_time_sync(ser: serial.Serial) -> bool:
     logger.info("Waiting for TIME_REQUEST from controller...")
-    ser.timeout = 6
+    ser.timeout = 12
     line = b''
     while True:
         byte = ser.read(1)
@@ -234,12 +234,19 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
             try:
                 logger.info("Opening %s at %d baud", port, baud)
                 ser = serial.Serial(port, baud, timeout=1)
+                ser.setRTS(False)
+                ser.setDTR(False)
             except serial.SerialException:
                 logger.info("Port %s not available, retrying in 3s...", port)
                 time.sleep(3)
 
-        if not handle_time_sync(ser):
-            logger.warning("Time sync failed — ECU timestamps will be epoch")
+        try:
+            if not handle_time_sync(ser):
+                logger.warning("Time sync failed — ECU timestamps will be epoch")
+        except serial.SerialException as exc:
+            logger.error("Time sync error: %s — reconnecting", exc)
+            ser.close()
+            continue
 
         logger.info("Listening for JSON packets...")
         try:
