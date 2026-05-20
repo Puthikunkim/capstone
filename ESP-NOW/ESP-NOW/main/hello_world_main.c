@@ -1,19 +1,20 @@
 // controller/main/main.c
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "driver/uart.h"
 
-// ── [ADDED] time sync headers ──────────────────────────────────
 #include <time.h>
-// ───────────────────────────────────────────────────────────────
 
 static const char *TAG = "CONTROLLER";
 
@@ -26,17 +27,17 @@ static const char *TAG = "CONTROLLER";
 #define SAMPLES_PER_FRAME     10
 #define MAX_FRAMES_PER_PKT    3
 
-// ── [ADDED] time sync config ───────────────────────────────────
 #define TIME_REQUEST_STR      "TIME_REQUEST\n"
 #define TIME_RESPONSE_BUF_LEN 128
-// ───────────────────────────────────────────────────────────────
+
 
 // ====== Message type ======
-#define MSG_HELLO     0x01
-#define MSG_REGISTER  0x02
-#define MSG_WELCOME   0x03
-#define MSG_DATA      0x04
-#define MSG_ACK       0x05
+#define MSG_HELLO             0x01
+#define MSG_REGISTER          0x02
+#define MSG_WELCOME           0x03
+#define MSG_DATA              0x04
+#define MSG_ACK               0x05
+#define MSG_POWER_LIMIT       0x06  // controller → sender: deliver power limit
 
 // ====== Data schema ======
 typedef struct {
@@ -49,20 +50,10 @@ typedef struct {
     uint8_t  sender_mac[6];
 } __attribute__((packed)) register_packet_t;
 
-// ── [MODIFIED] welcome_packet_t — added timestamp field ────────
-// Original:
-// typedef struct {
-//     uint8_t  msg_type;
-//     uint8_t  assigned_id;
-// } __attribute__((packed)) welcome_packet_t;
-//
-// Changed: added sync_timestamp so sender can anchor real time
 typedef struct {
     uint8_t  msg_type;
-    uint8_t  assigned_id;
-    char     sync_timestamp[32];  // [ADDED] ISO UTC timestamp from backend
+    char     sync_timestamp[32];
 } __attribute__((packed)) welcome_packet_t;
-// ───────────────────────────────────────────────────────────────
 
 typedef struct {
     uint16_t counter;
@@ -73,16 +64,20 @@ typedef struct {
 
 typedef struct {
     uint8_t    msg_type;
-    uint8_t    sender_id;
     uint8_t    frame_count;
     adc_frame_t frames[MAX_FRAMES_PER_PKT];
 } __attribute__((packed)) adc_packet_t;
 
 typedef struct {
     uint8_t  msg_type;
-    uint8_t  ack_to;
     uint16_t confirmed_floor;
 } __attribute__((packed)) ack_packet_t;
+
+// power_limit_mw: limit in milliwatts, pushed to the sender
+typedef struct {
+    uint8_t  msg_type;
+    int32_t  power_limit_mw;
+} __attribute__((packed)) power_limit_packet_t;
 
 // ====== Node Registry ======
 typedef enum {
@@ -93,7 +88,6 @@ typedef enum {
 
 typedef struct {
     uint8_t  mac[6];
-    uint8_t  ecu_id;
     uint16_t confirmed_floor;
     int64_t  last_seen_us;
     node_status_t  status;
@@ -103,73 +97,70 @@ static node_state_t registry[MAX_NODES];
 static uint8_t      registry_count = 0;
 static uint8_t      my_mac[6];
 
-// ── [ADDED] time sync state ────────────────────────────────────
-// Stores the ISO timestamp received from the backend and the
-// esp_timer value at the moment it was received. Used to compute
-// current real time for any WELCOME packet sent to a sender.
-static char    controller_sync_timestamp[32] = "2026-04-26T12:00:00.000000";
+// ====== Time sync state ======
+static char    controller_sync_timestamp[32] = "";
 static int64_t controller_sync_boot_us       = 0;
-static bool    time_synced                   = true;
-// ───────────────────────────────────────────────────────────────
+static bool    time_synced                   = false;
+
+// uart_mutex: prevents uart_send_json and uart_listener_task from
+// interleaving their writes on the TX line.
+static SemaphoreHandle_t uart_mutex;
 
 /*---------------------------------------------------------------
-    [ADDED] Time sync — request timestamp from backend over UART
-    Called once in app_main before HELLO broadcasts begin.
-    Sends "TIME_REQUEST\n" over UART and blocks until the backend
-    responds with a JSON line: {"timestamp":"2026-01-01T00:00:00.000000"}
+    Time sync — request timestamp from backend over UART
 ---------------------------------------------------------------*/
 static void request_time_from_backend(void) {
-    // send request to backend
-    uart_write_bytes(UART_PORT, TIME_REQUEST_STR, strlen(TIME_REQUEST_STR));
-    ESP_LOGI(TAG, "Sent TIME_REQUEST to backend, waiting...");
-
-    // block and read response line
     char buf[TIME_RESPONSE_BUF_LEN];
-    memset(buf, 0, sizeof(buf));
-    int idx = 0;
-    int64_t deadline = esp_timer_get_time() + 5000000LL; // 5s timeout
 
-    while (esp_timer_get_time() < deadline && idx < (int)sizeof(buf) - 1) {
-        uint8_t c;
-        int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(100));
-        if (r > 0) {
-            buf[idx++] = c;
-            if (c == '\n') break;
-        }
-    }
+    while (!time_synced) {
+        uart_write_bytes(UART_PORT, TIME_REQUEST_STR, strlen(TIME_REQUEST_STR));
+        ESP_LOGI(TAG, "Sent TIME_REQUEST to backend, waiting...");
 
-    // parse {"timestamp":"2026-01-01T00:00:00.000000"}
-    char *start = strstr(buf, "\"timestamp\"");
-    if (start) {
-        start = strchr(start, ':');
-        if (start) {
+        int64_t deadline = esp_timer_get_time() + 5000000LL; // 5s per attempt
+
+        while (esp_timer_get_time() < deadline) {
+            memset(buf, 0, sizeof(buf));
+            int idx = 0;
+
+            while (esp_timer_get_time() < deadline && idx < (int)sizeof(buf) - 1) {
+                uint8_t c;
+                int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(50));
+                if (r > 0) {
+                    buf[idx++] = c;
+                    if (c == '\n') break;
+                }
+            }
+
+            if (idx == 0) continue;
+
+            // parse {"timestamp":"2026-01-01T00:00:00.000000"}
+            char *start = strstr(buf, "\"timestamp\"");
+            if (!start) continue;
+
+            start = strchr(start, ':');
+            if (!start) continue;
             start++;
             while (*start == ' ' || *start == '"') start++;
             char *end = strchr(start, '"');
-            if (end) {
-                size_t len = end - start;
-                if (len < sizeof(controller_sync_timestamp)) {
-                    strncpy(controller_sync_timestamp, start, len);
-                    controller_sync_timestamp[len] = '\0';
-                    controller_sync_boot_us = esp_timer_get_time();
-                    time_synced = true;
-                    ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
-                }
+            if (!end) continue;
+
+            size_t len = end - start;
+            if (len < sizeof(controller_sync_timestamp)) {
+                strncpy(controller_sync_timestamp, start, len);
+                controller_sync_timestamp[len] = '\0';
+                controller_sync_boot_us = esp_timer_get_time();
+                time_synced = true;
+                ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
+                return;
             }
         }
-    }
 
-    if (!time_synced) {
-        ESP_LOGE(TAG, "Time sync failed — timestamps will be empty");
+        ESP_LOGW(TAG, "No response from backend, retrying...");
     }
 }
 
 /*---------------------------------------------------------------
-    [ADDED] Compute current real timestamp as ISO string.
-    Uses the sync anchor (controller_sync_timestamp +
-    controller_sync_boot_us) and current esp_timer to derive
-    how much time has elapsed, then formats the result.
-    Output written into `out` buffer of size `len`.
+    Compute current real timestamp as ISO string.
 ---------------------------------------------------------------*/
 static void get_current_timestamp(char *out, size_t len) {
     if (!time_synced) {
@@ -179,7 +170,6 @@ static void get_current_timestamp(char *out, size_t len) {
 
     int64_t elapsed_us = esp_timer_get_time() - controller_sync_boot_us;
 
-    // parse sync_timestamp "2026-03-25T12:00:00.000000"
     char base_no_us[32];
     int us = 0;
     char *dot = strchr(controller_sync_timestamp, '.');
@@ -222,9 +212,11 @@ static node_state_t *find_node_by_mac(const uint8_t *mac) {
 static node_state_t *register_node(const uint8_t *mac) {
     node_state_t *existing = find_node_by_mac(mac);
     if (existing) {
-        existing->status       = NODE_STREAMING;
-        existing->last_seen_us = esp_timer_get_time();
-        ESP_LOGI(TAG, "ECU%d reconnected", existing->ecu_id);
+        existing->status          = NODE_STREAMING;
+        existing->last_seen_us    = esp_timer_get_time();
+        existing->confirmed_floor = 0;
+        ESP_LOGI(TAG, "Node reconnected: MAC=%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         return existing;
     }
 
@@ -235,13 +227,11 @@ static node_state_t *register_node(const uint8_t *mac) {
 
     node_state_t *node = &registry[registry_count++];
     memcpy(node->mac, mac, 6);
-    node->ecu_id          = registry_count;
     node->confirmed_floor = 0;
     node->last_seen_us    = esp_timer_get_time();
     node->status          = NODE_STREAMING;
 
-    ESP_LOGI(TAG, "New node registered: ECU%d MAC=%02X:%02X:%02X:%02X:%02X:%02X",
-             node->ecu_id,
+    ESP_LOGI(TAG, "New node registered: MAC=%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     return node;
 }
@@ -262,24 +252,28 @@ static void add_peer(const uint8_t *mac) {
 }
 
 /*---------------------------------------------------------------
-    UART JSON output
+    UART JSON output (protected by uart_mutex)
 ---------------------------------------------------------------*/
 
-static void uart_send_json(const adc_packet_t *pkt, uint32_t rx_time_ms) {
+static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, uint32_t rx_time_ms) {
     char buf[600];
+    char ts[27];
     int pos = 0;
 
+    get_current_timestamp(ts, sizeof(ts));
+
     pos += snprintf(buf + pos, sizeof(buf) - pos,
-                    "{\"ecu_id\":%d,\"rx_time_ms\":%lu,\"frames\":[",
-                    pkt->sender_id, (unsigned long)rx_time_ms);
+                    "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"rx_time_ms\":%lu,\"frames\":[",
+                    sender_mac[0], sender_mac[1], sender_mac[2],
+                    sender_mac[3], sender_mac[4], sender_mac[5],
+                    (unsigned long)rx_time_ms);
 
     for (int f = 0; f < pkt->frame_count; f++) {
         const adc_frame_t *frame = &pkt->frames[f];
 
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-                        "{\"counter\":%d,\"tx_time_ms\":%lu,\"voltage\":[",
-                        frame->counter,
-                        (unsigned long)frame->time_since_boot_ms);
+                        "{\"counter\":%d,\"tx_time_ms\":\"%s\",\"voltage\":[",
+                        frame->counter, ts);
 
         for (int i = 0; i < SAMPLES_PER_FRAME; i++)
             pos += snprintf(buf + pos, sizeof(buf) - pos,
@@ -298,7 +292,82 @@ static void uart_send_json(const adc_packet_t *pkt, uint32_t rx_time_ms) {
     }
 
     pos += snprintf(buf + pos, sizeof(buf) - pos, "]}\n");
+
+    xSemaphoreTake(uart_mutex, portMAX_DELAY);
     uart_write_bytes(UART_PORT, buf, pos);
+    xSemaphoreGive(uart_mutex);
+}
+
+/*---------------------------------------------------------------
+    UART listener task
+    Reads lines from the Python backend. When it sees a power_limit
+    message it forwards the limit to the right sender via ESP-NOW.
+
+    Expected format from Python:
+      {"type":"power_limit","mac":"AA:BB:CC:DD:EE:FF","power_limit_watts":350.0}\n
+---------------------------------------------------------------*/
+static void uart_listener_task(void *arg) {
+    char buf[160];
+
+    while (1) {
+        memset(buf, 0, sizeof(buf));
+        int idx = 0;
+
+        while (idx < (int)sizeof(buf) - 1) {
+            uint8_t c;
+            int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(100));
+            if (r > 0) {
+                buf[idx++] = c;
+                if (c == '\n') break;
+            }
+        }
+
+        if (idx == 0) continue;
+
+        // Only handle power_limit messages
+        if (!strstr(buf, "\"power_limit\"")) continue;
+
+        // Parse MAC: "mac":"AA:BB:CC:DD:EE:FF"
+        char *mac_key = strstr(buf, "\"mac\"");
+        if (!mac_key) continue;
+        mac_key = strchr(mac_key, ':');
+        if (!mac_key) continue;
+        mac_key++;
+        while (*mac_key == ' ' || *mac_key == '"') mac_key++;
+
+        uint8_t mac[6];
+        if (sscanf(mac_key, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+                   &mac[0], &mac[1], &mac[2],
+                   &mac[3], &mac[4], &mac[5]) != 6) {
+            ESP_LOGW(TAG, "power_limit: bad MAC in: %.80s", buf);
+            continue;
+        }
+
+        // Parse power_limit_watts
+        char *watts_key = strstr(buf, "\"power_limit_watts\"");
+        if (!watts_key) continue;
+        watts_key = strchr(watts_key, ':');
+        if (!watts_key) continue;
+        watts_key++;
+        while (*watts_key == ' ') watts_key++;
+        float watts = strtof(watts_key, NULL);
+        int32_t mw  = (int32_t)(watts * 1000.0f);
+
+        // Forward to sender via ESP-NOW
+        node_state_t *node = find_node_by_mac(mac);
+        if (!node) {
+            ESP_LOGW(TAG, "power_limit: MAC not in registry");
+            continue;
+        }
+
+        power_limit_packet_t pkt = {
+            .msg_type       = MSG_POWER_LIMIT,
+            .power_limit_mw = mw,
+        };
+        esp_now_send(mac, (uint8_t *)&pkt, sizeof(pkt));
+        ESP_LOGI(TAG, "Sent power limit %.1fW to %02X:%02X:%02X:%02X:%02X:%02X",
+                 watts, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
 }
 
 /*---------------------------------------------------------------
@@ -314,30 +383,20 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     if (msg_type == MSG_REGISTER && len == sizeof(register_packet_t)) {
         const register_packet_t *reg = (const register_packet_t *)data;
 
-        add_peer(reg->sender_mac);
-        node_state_t *node = register_node(reg->sender_mac);
+        add_peer(info->src_addr);
+        node_state_t *node = register_node(info->src_addr);
         if (!node) return;
 
-        // ── [MODIFIED] WELCOME now includes sync_timestamp ─────
-        // Original:
-        // welcome_packet_t welcome = {
-        //     .msg_type    = MSG_WELCOME,
-        //     .assigned_id = node->ecu_id,
-        // };
-        //
-        // Changed: piggyback current real timestamp so sender can
-        // anchor its clock without WiFi or NTP
         welcome_packet_t welcome = {
-            .msg_type    = MSG_WELCOME,
-            .assigned_id = node->ecu_id,
+            .msg_type = MSG_WELCOME,
         };
-        get_current_timestamp(welcome.sync_timestamp,       // [ADDED]
-                              sizeof(welcome.sync_timestamp)); // [ADDED]
-        // ───────────────────────────────────────────────────────
+        get_current_timestamp(welcome.sync_timestamp, sizeof(welcome.sync_timestamp));
 
-        esp_now_send(reg->sender_mac, (uint8_t *)&welcome, sizeof(welcome));
-        ESP_LOGI(TAG, "Sent WELCOME to ECU%d with timestamp: %s",
-                 node->ecu_id, welcome.sync_timestamp); // [MODIFIED] log
+        esp_now_send(info->src_addr, (uint8_t *)&welcome, sizeof(welcome));
+        ESP_LOGI(TAG, "Sent WELCOME to %02X:%02X:%02X:%02X:%02X:%02X ts=%s",
+                 info->src_addr[0], info->src_addr[1], info->src_addr[2],
+                 info->src_addr[3], info->src_addr[4], info->src_addr[5],
+                 welcome.sync_timestamp);
         return;
     }
 
@@ -360,14 +419,15 @@ static void on_data_recv(const esp_now_recv_info_t *info,
                 node->confirmed_floor = pkt->frames[i].counter;
         }
 
-        ESP_LOGI(TAG, "ECU%d | %d frame(s) | floor=%d",
-                 pkt->sender_id, pkt->frame_count, node->confirmed_floor);
+        ESP_LOGI(TAG, "Sender %02X:%02X:%02X:%02X:%02X:%02X | %d frame(s) | floor=%d",
+                 info->src_addr[0], info->src_addr[1], info->src_addr[2],
+                 info->src_addr[3], info->src_addr[4], info->src_addr[5],
+                 pkt->frame_count, node->confirmed_floor);
 
-        uart_send_json(pkt, rx_time_ms);
+        uart_send_json(pkt, info->src_addr, rx_time_ms);
 
         ack_packet_t ack = {
             .msg_type        = MSG_ACK,
-            .ack_to          = node->ecu_id,
             .confirmed_floor = node->confirmed_floor,
         };
         esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
@@ -412,7 +472,9 @@ static void watchdog_task(void *arg) {
             if (node->status == NODE_STREAMING &&
                 now - node->last_seen_us > DISCONNECT_TIMEOUT_US) {
                 node->status = NODE_DISCONNECTED;
-                ESP_LOGW(TAG, "ECU%d DISCONNECTED (5min timeout)", node->ecu_id);
+                ESP_LOGW(TAG, "Sender %02X:%02X:%02X:%02X:%02X:%02X DISCONNECTED (5min timeout)",
+                         node->mac[0], node->mac[1], node->mac[2],
+                         node->mac[3], node->mac[4], node->mac[5]);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -442,6 +504,9 @@ static void wifi_init(void) {
 ---------------------------------------------------------------*/
 
 void app_main(void) {
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
     wifi_init();
 
     uart_config_t uart_cfg = {
@@ -454,11 +519,9 @@ void app_main(void) {
     uart_driver_install(UART_PORT, 1024, 0, 0, NULL, 0);
     uart_param_config(UART_PORT, &uart_cfg);
 
-    // ── [ADDED] request time from backend before anything else ─
-    // Must happen after UART init and before HELLO broadcasts so
-    // every WELCOME packet carries a valid timestamp
+    uart_mutex = xSemaphoreCreateMutex();
+
     request_time_from_backend();
-    // ───────────────────────────────────────────────────────────
 
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
@@ -466,8 +529,9 @@ void app_main(void) {
     }
     esp_now_register_recv_cb(on_data_recv);
 
-    xTaskCreate(hello_task,    "hello",    2048, NULL, 3, NULL);
-    xTaskCreate(watchdog_task, "watchdog", 2048, NULL, 2, NULL);
+    xTaskCreate(hello_task,         "hello",        2048, NULL, 3, NULL);
+    xTaskCreate(watchdog_task,      "watchdog",     2048, NULL, 2, NULL);
+    xTaskCreate(uart_listener_task, "uart_listen",  4096, NULL, 4, NULL);
 
     ESP_LOGI(TAG, "Controller ready, broadcasting HELLO...");
 }

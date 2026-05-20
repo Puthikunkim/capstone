@@ -16,5 +16,7 @@
     "--query-driver=**",
     "--compile-commands-dir=d:\\Study\\AKL\\University-of-Auckland\\Engineering-forth-year\\COMPSYS770\\ESP-NOW\\ESP-NOW\\build"
   ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.port": "/dev/tty.usbserial-1120",
+  "idf.currentSetup": "/Users/ajith/.espressif/v6.0/esp-idf"
 }
