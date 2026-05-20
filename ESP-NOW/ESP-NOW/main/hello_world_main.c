@@ -110,50 +110,53 @@ static SemaphoreHandle_t uart_mutex;
     Time sync — request timestamp from backend over UART
 ---------------------------------------------------------------*/
 static void request_time_from_backend(void) {
-    uart_write_bytes(UART_PORT, TIME_REQUEST_STR, strlen(TIME_REQUEST_STR));
-    ESP_LOGI(TAG, "Sent TIME_REQUEST to backend, waiting...");
-
     char buf[TIME_RESPONSE_BUF_LEN];
-    int64_t deadline = esp_timer_get_time() + 5000000LL; // 5s timeout
 
-    while (esp_timer_get_time() < deadline) {
-        memset(buf, 0, sizeof(buf));
-        int idx = 0;
+    while (!time_synced) {
+        uart_write_bytes(UART_PORT, TIME_REQUEST_STR, strlen(TIME_REQUEST_STR));
+        ESP_LOGI(TAG, "Sent TIME_REQUEST to backend, waiting...");
 
-        while (esp_timer_get_time() < deadline && idx < (int)sizeof(buf) - 1) {
-            uint8_t c;
-            int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(50));
-            if (r > 0) {
-                buf[idx++] = c;
-                if (c == '\n') break;
+        int64_t deadline = esp_timer_get_time() + 5000000LL; // 5s per attempt
+
+        while (esp_timer_get_time() < deadline) {
+            memset(buf, 0, sizeof(buf));
+            int idx = 0;
+
+            while (esp_timer_get_time() < deadline && idx < (int)sizeof(buf) - 1) {
+                uint8_t c;
+                int r = uart_read_bytes(UART_PORT, &c, 1, pdMS_TO_TICKS(50));
+                if (r > 0) {
+                    buf[idx++] = c;
+                    if (c == '\n') break;
+                }
+            }
+
+            if (idx == 0) continue;
+
+            // parse {"timestamp":"2026-01-01T00:00:00.000000"}
+            char *start = strstr(buf, "\"timestamp\"");
+            if (!start) continue;
+
+            start = strchr(start, ':');
+            if (!start) continue;
+            start++;
+            while (*start == ' ' || *start == '"') start++;
+            char *end = strchr(start, '"');
+            if (!end) continue;
+
+            size_t len = end - start;
+            if (len < sizeof(controller_sync_timestamp)) {
+                strncpy(controller_sync_timestamp, start, len);
+                controller_sync_timestamp[len] = '\0';
+                controller_sync_boot_us = esp_timer_get_time();
+                time_synced = true;
+                ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
+                return;
             }
         }
 
-        if (idx == 0) continue;
-
-        // parse {"timestamp":"2026-01-01T00:00:00.000000"}
-        char *start = strstr(buf, "\"timestamp\"");
-        if (!start) continue;
-
-        start = strchr(start, ':');
-        if (!start) continue;
-        start++;
-        while (*start == ' ' || *start == '"') start++;
-        char *end = strchr(start, '"');
-        if (!end) continue;
-
-        size_t len = end - start;
-        if (len < sizeof(controller_sync_timestamp)) {
-            strncpy(controller_sync_timestamp, start, len);
-            controller_sync_timestamp[len] = '\0';
-            controller_sync_boot_us = esp_timer_get_time();
-            time_synced = true;
-            ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
-            return;
-        }
+        ESP_LOGW(TAG, "No response from backend, retrying...");
     }
-
-    ESP_LOGE(TAG, "Time sync failed — no valid timestamp received from backend");
 }
 
 /*---------------------------------------------------------------
@@ -209,8 +212,9 @@ static node_state_t *find_node_by_mac(const uint8_t *mac) {
 static node_state_t *register_node(const uint8_t *mac) {
     node_state_t *existing = find_node_by_mac(mac);
     if (existing) {
-        existing->status       = NODE_STREAMING;
-        existing->last_seen_us = esp_timer_get_time();
+        existing->status          = NODE_STREAMING;
+        existing->last_seen_us    = esp_timer_get_time();
+        existing->confirmed_floor = 0;
         ESP_LOGI(TAG, "Node reconnected: MAC=%02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
         return existing;
