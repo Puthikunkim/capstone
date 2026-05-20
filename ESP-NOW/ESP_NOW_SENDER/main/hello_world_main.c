@@ -278,6 +278,7 @@ static void on_data_sent(const esp_now_send_info_t *tx_info, esp_now_send_status
 
         if (consecutive_timeouts >= DISCONNECT_THRESHOLD && !is_disconnected) {
             is_disconnected        = true;
+            registered             = false;
             disconnect_time_ms     = esp_timer_get_time() / 1000;
             disconnect_first_frame = confirmed_floor + 1;
 
@@ -525,6 +526,7 @@ void sender_task(void *arg) {
 
                 if (consecutive_timeouts >= DISCONNECT_THRESHOLD && !is_disconnected) {
                     is_disconnected        = true;
+                    registered             = false;
                     disconnect_time_ms     = now;
                     disconnect_first_frame = confirmed_floor + 1;
 
