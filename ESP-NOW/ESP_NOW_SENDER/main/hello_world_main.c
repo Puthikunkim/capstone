@@ -54,7 +54,7 @@ typedef struct {
 
 typedef struct {
     uint16_t counter;
-    uint32_t time_since_boot_ms;
+    int64_t  tx_epoch_us;  // UTC microseconds since epoch, computed by sender at capture time
     int16_t  current_mv[SAMPLES_PER_FRAME];
     int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
@@ -110,7 +110,7 @@ static bool     is_disconnected        = false;
 static int64_t  disconnect_time_ms     = 0;
 static uint16_t disconnect_first_frame = 0;
 static uint8_t  consecutive_timeouts   = 0;
-#define DISCONNECT_THRESHOLD  3
+#define DISCONNECT_THRESHOLD  10
 
 // ====== Flash persistence ======
 #define FLASH_FILE           "/spiffs/frames.bin"
@@ -168,20 +168,18 @@ static void on_power_limit_received(int32_t limit_mw) {
 }
 
 /*---------------------------------------------------------------
-    Compute real ISO timestamp for a given frame.
-    frame_boot_us: the esp_timer value when the frame was sampled.
-    Hot path: 3 integer ops only (sync_base_us precomputed at WELCOME).
+    Format a precomputed UTC epoch (microseconds since Unix epoch)
+    as an ISO-8601 string.  epoch_us == 0 → epoch fallback string.
 ---------------------------------------------------------------*/
-static void compute_frame_timestamp(int64_t frame_boot_us,
+static void compute_frame_timestamp(int64_t epoch_us,
                                     char *out, size_t len) {
-    if (!time_synced) {
+    if (epoch_us == 0) {
         strncpy(out, "1970-01-01T00:00:00.000000", len);
         return;
     }
 
-    int64_t total_us  = sync_base_us + (frame_boot_us - sync_boot_us);
-    time_t  final_sec = total_us / 1000000LL;
-    int     final_us  = (int)(total_us % 1000000LL);
+    time_t  final_sec = epoch_us / 1000000LL;
+    int     final_us  = (int)(epoch_us % 1000000LL);
 
     struct tm *final_tm = gmtime(&final_sec);
     snprintf(out, len,
@@ -356,7 +354,9 @@ static uint8_t build_packet(adc_packet_t *pkt) {
         adc_frame_t *dst = &pkt->frames[pkt->frame_count++];
 
         dst->counter = f->counter;
-        dst->time_since_boot_ms = (uint32_t)f->time_100ms * 100;
+        int64_t frame_boot_us = (int64_t)f->time_100ms * 100000LL;
+        int64_t epoch = time_synced ? (sync_base_us + (frame_boot_us - sync_boot_us)) : 0LL;
+        dst->tx_epoch_us = (epoch > 0) ? epoch : 0LL;
 
         uint16_t tmp_current[SAMPLES_PER_FRAME];
         uint16_t tmp_voltage[SAMPLES_PER_FRAME];
@@ -434,6 +434,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     if (msg_type == MSG_WELCOME && len == sizeof(welcome_packet_t)) {
         const welcome_packet_t *welcome = (const welcome_packet_t *)data;
         registered = true;
+        consecutive_timeouts = 0;
 
         // Anchor real wall-clock time from the controller's timestamp
         strncpy(sync_timestamp, welcome->sync_timestamp, sizeof(sync_timestamp));
@@ -651,11 +652,9 @@ void sender_task(void *arg) {
                 memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
                 if (count > 0) {
-                    if (time_synced) {
+                    if (pkt.frames[0].tx_epoch_us != 0) {
                         char ts[32];
-                        int64_t frame_us =
-                            (int64_t)pkt.frames[0].time_since_boot_ms * 1000LL;
-                        compute_frame_timestamp(frame_us, ts, sizeof(ts));
+                        compute_frame_timestamp(pkt.frames[0].tx_epoch_us, ts, sizeof(ts));
                         ESP_LOGI(TAG, "Sent %d frame(s), counter %d~%d, first ts: %s",
                                  count,
                                  pkt.frames[0].counter,

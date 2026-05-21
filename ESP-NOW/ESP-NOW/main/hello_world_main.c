@@ -57,7 +57,7 @@ typedef struct {
 
 typedef struct {
     uint16_t counter;
-    uint32_t time_since_boot_ms;
+    int64_t  tx_epoch_us;  // UTC microseconds since epoch, computed by sender
     int16_t  current_mv[SAMPLES_PER_FRAME];
     int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
@@ -184,6 +184,10 @@ static void _format_us(int64_t total_us, char *out, size_t len) {
     time_t final_sec     = total_us / 1000000LL;
     int    final_us      = (int)(total_us % 1000000LL);
     struct tm *final_tm  = gmtime(&final_sec);
+    if (!final_tm) {
+        strncpy(out, "1970-01-01T00:00:00.000000", len);
+        return;
+    }
     snprintf(out, len, "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
              final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
              final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
@@ -202,16 +206,15 @@ static void get_current_timestamp(char *out, size_t len) {
 }
 
 /*---------------------------------------------------------------
-    Compute a per-frame ISO timestamp from its boot-relative time.
+    Format a sender-computed UTC epoch (microseconds since Unix epoch)
+    as an ISO-8601 string.  tx_epoch_us == 0 → epoch fallback string.
 ---------------------------------------------------------------*/
-static void get_frame_timestamp(uint32_t time_since_boot_ms, char *out, size_t len) {
-    if (!time_synced) {
+static void get_frame_timestamp(int64_t tx_epoch_us, char *out, size_t len) {
+    if (tx_epoch_us == 0) {
         strncpy(out, "1970-01-01T00:00:00.000000", len);
         return;
     }
-    _format_us(controller_sync_base_us +
-               ((int64_t)time_since_boot_ms * 1000LL - controller_sync_boot_us),
-               out, len);
+    _format_us(tx_epoch_us, out, len);
 }
 
 /*---------------------------------------------------------------
@@ -285,7 +288,7 @@ static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, u
     for (int f = 0; f < pkt->frame_count; f++) {
         const adc_frame_t *frame = &pkt->frames[f];
         char ts[27];
-        get_frame_timestamp(frame->time_since_boot_ms, ts, sizeof(ts));
+        get_frame_timestamp(frame->tx_epoch_us, ts, sizeof(ts));
 
         pos += snprintf(buf + pos, sizeof(buf) - pos,
                         "{\"counter\":%d,\"tx_time_ms\":\"%s\",\"voltage\":[",
@@ -397,10 +400,6 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
     // ── REGISTER: Sender requesting to join ──
     if (msg_type == MSG_REGISTER && len == sizeof(register_packet_t)) {
-        if (!time_synced) {
-            // Can't send a valid timestamp yet — sender will retry on the next HELLO
-            return;
-        }
         const register_packet_t *reg = (const register_packet_t *)data;
 
         add_peer(info->src_addr);
@@ -548,11 +547,15 @@ void app_main(void) {
 
     esp_now_register_recv_cb(on_data_recv);
 
-    xTaskCreate(hello_task,         "hello",        2048, NULL, 3, NULL);
-    xTaskCreate(watchdog_task,      "watchdog",     2048, NULL, 2, NULL);
-    xTaskCreate(uart_listener_task, "uart_listen",  4096, NULL, 4, NULL);
+    xTaskCreate(hello_task,    "hello",    2048, NULL, 3, NULL);
+    xTaskCreate(watchdog_task, "watchdog", 2048, NULL, 2, NULL);
 
     ESP_LOGI(TAG, "Controller broadcasting HELLO, syncing time...");
     request_time_from_backend();
     ESP_LOGI(TAG, "Time synced — controller ready.");
+
+    // uart_listener_task reads UART RX for power-limit commands.
+    // It must start after request_time_from_backend() so they don't
+    // race on the same RX buffer and corrupt the time-sync response.
+    xTaskCreate(uart_listener_task, "uart_listen", 4096, NULL, 4, NULL);
 }
