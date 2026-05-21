@@ -89,8 +89,11 @@ static uint16_t next_counter     = 0;
 static uint16_t confirmed_floor  = 0;
 
 // ====== Power limit state ======
-// -1 means not yet received from the controller
-static volatile int32_t power_threshold_mw = -1;
+// Start with 10 kW so the over-power flag never fires before the controller
+// delivers a real limit.  Replaced by MSG_POWER_LIMIT whenever the backend
+// pushes one via the controller.
+#define DEFAULT_POWER_LIMIT_MW  10000000L
+static volatile int32_t power_threshold_mw = DEFAULT_POWER_LIMIT_MW;
 static volatile bool    over_power_flag    = false;
 
 // ====== Status ======
@@ -99,6 +102,9 @@ static uint8_t  controller_mac[6];
 static bool     registered       = false;
 static volatile bool waiting_ack = false;
 static volatile int64_t last_send_time = 0;
+
+static TaskHandle_t adc_task_handle    = NULL;
+static TaskHandle_t sender_task_handle = NULL;
 
 static bool     is_disconnected        = false;
 static int64_t  disconnect_time_ms     = 0;
@@ -456,8 +462,10 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
         ESP_LOGI(TAG, "Registered! sync time = %s", sync_timestamp);
 
-        xTaskCreate(adc_task,    "adc_task",    4096, NULL, 6, NULL);
-        xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, NULL);
+        if (adc_task_handle == NULL)
+            xTaskCreate(adc_task,    "adc_task",    4096, NULL, 6, &adc_task_handle);
+        if (sender_task_handle == NULL)
+            xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, &sender_task_handle);
         return;
     }
 
@@ -562,25 +570,22 @@ void adc_task(void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
-            // Power threshold check — only active once limit has been received
-            if (power_threshold_mw > 0) {
-                int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
-                if (power_mw > power_threshold_mw) {
-                    if (!over_power_flag) {
-                        over_power_flag = true;
-                        ESP_LOGE(TAG,
-                                 "OVER POWER: %ld mW > threshold %ld mW "
-                                 "(V=%d mV, I=%d mV)",
-                                 power_mw, power_threshold_mw,
-                                 (int16_t)mv_v, (int16_t)mv_c);
-                    }
-                } else {
-                    if (over_power_flag) {
-                        over_power_flag = false;
-                        ESP_LOGI(TAG,
-                                 "Power back to normal: %ld mW <= threshold %ld mW",
-                                 power_mw, power_threshold_mw);
-                    }
+            int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
+            if (power_mw > power_threshold_mw) {
+                if (!over_power_flag) {
+                    over_power_flag = true;
+                    ESP_LOGE(TAG,
+                             "OVER POWER: %ld mW > threshold %ld mW "
+                             "(V=%d mV, I=%d mV)",
+                             power_mw, power_threshold_mw,
+                             (int16_t)mv_v, (int16_t)mv_c);
+                }
+            } else {
+                if (over_power_flag) {
+                    over_power_flag = false;
+                    ESP_LOGI(TAG,
+                             "Power back to normal: %ld mW <= threshold %ld mW",
+                             power_mw, power_threshold_mw);
                 }
             }
 
