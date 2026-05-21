@@ -646,7 +646,7 @@ void sender_task(void *arg) {
                 }
             }
 
-            if (!waiting_ack) {
+            if (!waiting_ack && registered) {
                 adc_packet_t pkt;
                 memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
