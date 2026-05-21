@@ -365,9 +365,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
         })
         .catch(() => {});
     } else {
-      // No timing: live chart seeds from last 100 ECU frames, history shows all ECU frames
+      // No timing: live chart seeds from last 100 ECU frames, history shows last 10 000 frames (~17 min at 10 fps)
       const livePromise = fetchEcuHistory(selectedEcuId, { limit: 100, teamId });
-      const historyPromise = fetchEcuHistory(selectedEcuId, { teamId });
+      const historyPromise = fetchEcuHistory(selectedEcuId, { limit: 10000, teamId });
       Promise.all([livePromise, historyPromise])
         .then(([liveFrames, allFrames]) => {
           const sortFn = (a, b) => new Date(a.timestamp) - new Date(b.timestamp);
@@ -402,7 +402,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       const next = [...prev, ...newPoints];
       return next.length > 200 ? next.slice(-200) : next;
     });
-    setHistoryPoints((prev) => [...prev, ...newPoints]);
+    setHistoryPoints((prev) => {
+      const next = [...prev, ...newPoints];
+      return next.length > 100000 ? next.slice(-100000) : next;
+    });
   }, [liveData]);
 
   // ── Config form ──────────────────────────────────────────────────
