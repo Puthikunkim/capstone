@@ -397,6 +397,10 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
     // ── REGISTER: Sender requesting to join ──
     if (msg_type == MSG_REGISTER && len == sizeof(register_packet_t)) {
+        if (!time_synced) {
+            // Can't send a valid timestamp yet — sender will retry on the next HELLO
+            return;
+        }
         const register_packet_t *reg = (const register_packet_t *)data;
 
         add_peer(info->src_addr);
@@ -541,7 +545,6 @@ void app_main(void) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
-    request_time_from_backend();
 
     esp_now_register_recv_cb(on_data_recv);
 
@@ -549,5 +552,7 @@ void app_main(void) {
     xTaskCreate(watchdog_task,      "watchdog",     2048, NULL, 2, NULL);
     xTaskCreate(uart_listener_task, "uart_listen",  4096, NULL, 4, NULL);
 
-    ESP_LOGI(TAG, "Controller ready, broadcasting HELLO...");
+    ESP_LOGI(TAG, "Controller broadcasting HELLO, syncing time...");
+    request_time_from_backend();
+    ESP_LOGI(TAG, "Time synced — controller ready.");
 }
