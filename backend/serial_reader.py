@@ -38,43 +38,30 @@ logger = logging.getLogger(__name__)
 SAMPLES = 10
 MAX_FRAMES = 31
 
-
 # ---------------------------------------------------------------------------
-# Time sync
+# Outbound write queue
+# Callers outside the serial thread (e.g. REST handlers) put pre-encoded
+# newline-terminated ASCII messages here.  _serial_thread drains it after
+# each line it reads so messages are dispatched promptly.
 # ---------------------------------------------------------------------------
 
-def handle_power_limit_request(ser: serial.Serial, line: str) -> None:
-    """Handle a power_limit_request line from the controller.
+_write_queue: queue.Queue = queue.Queue()
 
-    The controller sends:
-        {"type":"power_limit_request","mac":"AA:BB:CC:DD:EE:FF"}
-    We respond with:
-        {"type":"power_limit_response","mac":"...","power_limit_watts":350.0}
+
+def enqueue_power_limit(mac: str, power_limit_watts: float) -> None:
+    """Push a power-limit command to the controller over UART.
+
+    Safe to call from any thread at any time; the message is delivered on
+    the next iteration of the serial read loop.  If the port is currently
+    disconnected the message is held in the queue and sent on reconnect.
     """
-    try:
-        req = json.loads(line)
-        mac = req.get("mac", "")
-    except json.JSONDecodeError:
-        logger.warning("power_limit_request: invalid JSON — %r", line[:120])
-        return
-
-    from sqlalchemy import select
-    from app.models.ecu import ECU
-    db = SessionLocal()
-    try:
-        ecu = db.scalar(select(ECU).where(ECU.mac_address == mac))
-        power_limit = float(ecu.power_limit_watts) if ecu else 350.0
-    finally:
-        db.close()
-
-    response = json.dumps({
-        "type": "power_limit_response",
+    msg = json.dumps({
+        "type": "power_limit",
         "mac": mac,
-        "power_limit_watts": power_limit,
+        "power_limit_watts": power_limit_watts,
     }) + "\n"
-    ser.write(response.encode("ascii"))
-    ser.flush()
-    logger.info("Power limit response sent: %.1f W for MAC %s", power_limit, mac)
+    _write_queue.put(msg.encode("ascii"))
+    logger.info("Queued power limit %.1f W for MAC %s", power_limit_watts, mac)
 
 
 def handle_time_sync(ser: serial.Serial) -> bool:
@@ -265,15 +252,19 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
                     else:
                         logger.debug("Ignoring non-JSON line: %r", line[:80])
                     continue
-                if '"power_limit_request"' in line:
-                    handle_power_limit_request(ser, line)
-                    continue
                 packet = parse_packet(line)
                 if packet is None:
                     continue
                 for frame in packet["frames"]:
                     frame["sender_id"] = packet["sender_id"]
                     out.put(frame)
+
+                while not _write_queue.empty():
+                    try:
+                        ser.write(_write_queue.get_nowait())
+                        ser.flush()
+                    except queue.Empty:
+                        break
         except Exception as exc:
             logger.error("Serial thread error: %s", exc)
         finally:
