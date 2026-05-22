@@ -45,7 +45,7 @@ function TeamCard({ team, ecu, isActive, isViolating, onSelect }) {
       </div>
       {ecu ? (
         <div className="team-card-ecu">
-          <span>ECU #{ecu.serial_number}</span>
+          <span>{ecu.mac_address ?? "—"}</span>
           <FlashIndicator flashUsage={ecu.flash_usage} />
         </div>
       ) : (
@@ -113,7 +113,7 @@ export function Sidebar({
     if (!q) return true;
     if (team.name.toLowerCase().includes(q)) return true;
     const ecu = ecuList.find((e) => e.team_id === team.id);
-    return ecu ? String(ecu.serial_number).includes(q) : false;
+    return ecu ? (ecu.mac_address ?? "").toLowerCase().includes(q) : false;
   });
 
   return (

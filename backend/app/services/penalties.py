@@ -19,6 +19,7 @@ class ViolationUpdate:
 	event: PowerViolationEvent | None
 	transition: str
 	over_limit: bool
+	team_id: int | None = None
 
 
 # Keep all internal timestamps UTC for consistent duration math.
@@ -89,8 +90,9 @@ def track_power_violation(
 			db.add(event)
 			db.commit()
 			db.refresh(event)
-			return ViolationUpdate(event=event, transition="started", over_limit=True)
+			return ViolationUpdate(event=event, transition="started", over_limit=True, team_id=attached_ecu.team_id)
 
+		was_warning = open_event.is_warning
 		open_event.frame_count += 1
 		if frame_timestamp > _to_utc(open_event.last_over_timestamp):
 			open_event.last_over_timestamp = frame_timestamp
@@ -101,7 +103,8 @@ def track_power_violation(
 		open_event.is_warning = open_event.penalty_seconds == 0.0
 		db.commit()
 		db.refresh(open_event)
-		return ViolationUpdate(event=open_event, transition="ongoing", over_limit=True)
+		transition = "escalated" if (was_warning and not open_event.is_warning) else "ongoing"
+		return ViolationUpdate(event=open_event, transition=transition, over_limit=True, team_id=attached_ecu.team_id)
 
 	if open_event is None:
 		return ViolationUpdate(event=None, transition="none", over_limit=False)
@@ -116,7 +119,7 @@ def track_power_violation(
 	open_event.is_warning = open_event.penalty_seconds == 0.0
 	db.commit()
 	db.refresh(open_event)
-	return ViolationUpdate(event=open_event, transition="ended", over_limit=False)
+	return ViolationUpdate(event=open_event, transition="ended", over_limit=False, team_id=attached_ecu.team_id)
 
 
 def get_violation_events(

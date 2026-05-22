@@ -1,4 +1,28 @@
 import { useEffect, useRef, useState } from "react";
+
+// useViolationsWebSocket connects once to /ws/violations and calls onEvent for each message.
+// Uses a ref so the callback can change (e.g. capture fresh state) without reconnecting.
+export function useViolationsWebSocket(onEvent) {
+	const wsRef = useRef(null);
+	const onEventRef = useRef(onEvent);
+
+	useEffect(() => {
+		onEventRef.current = onEvent;
+	});
+
+	useEffect(() => {
+		const client = new WebSocketClient(
+			"ws://localhost:8000/ws/violations",
+			(data) => onEventRef.current?.(data),
+		);
+		client.connect();
+		wsRef.current = client;
+		return () => {
+			wsRef.current?.close();
+			wsRef.current = null;
+		};
+	}, []);
+}
 import WebSocketClient from "../api/websocket";
 
 // useWebSocket manages connection lifecycle for an ECU websocket channel.

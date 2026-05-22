@@ -1320,3 +1320,87 @@ body {
   .navbar-center { display: none; }
   .stat-cards { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── Notification bell ───────────────────────────────────────────── */
+.notif-bell-btn { position: relative; }
+.notif-bell-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  min-width: 16px; height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* ── Notification panel ──────────────────────────────────────────── */
+.notif-panel {
+  position: fixed;
+  top: 56px; right: 0;
+  width: 320px;
+  height: calc(100vh - 56px);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  box-shadow: -4px 0 24px rgba(0,0,0,.4);
+}
+.notif-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.notif-panel-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.notif-panel-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary); padding: 4px;
+  border-radius: 4px;
+  display: flex; align-items: center;
+}
+.notif-panel-close:hover { color: var(--text-primary); background: var(--accent-dim); }
+.notif-panel-body { flex: 1; overflow-y: auto; padding: 8px; }
+.notif-panel-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Violation log entries ───────────────────────────────────────── */
+.notif-entry {
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  border-left: 3px solid transparent;
+}
+.notif-entry--violation {
+  background: var(--red-dim);
+  border-left-color: var(--red);
+}
+.notif-entry--warning {
+  background: rgba(245,158,11,.08);
+  border-left-color: var(--orange);
+}
+.notif-entry-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.notif-entry-team { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.notif-entry-time { font-size: 11px; color: var(--text-secondary); }
+.notif-entry-detail {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}

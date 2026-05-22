@@ -247,14 +247,11 @@ EventTimingCard.propTypes = {
 
 function useSessionTimer(active) {
   const [seconds, setSeconds] = useState(0);
-  const intervalRef = useRef(null);
 
   useEffect(() => {
-    setSeconds(0);
-    if (active) {
-      intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    }
-    return () => clearInterval(intervalRef.current);
+    if (!active) return; // pause when ECU is offline — don't reset accumulated time
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
   }, [active]);
 
   const h = String(Math.floor(seconds / 3600)).padStart(2, "0");
@@ -296,7 +293,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
 
   const activeTeamId = monitoring ? teamId : null;
   const { isConnected, liveData } = useTeamWebSocket(activeTeamId);
-  const sessionTime = useSessionTimer(isConnected);
+  // ecuData.is_connected reflects whether the physical ECU is sending frames (last_seen within 10s).
+  // isConnected only tells us the WebSocket to the backend is open — always true while backend runs.
+  const ecuIsConnected = ecuData?.is_connected ?? false;
+  const sessionTime = useSessionTimer(ecuIsConnected);
 
   // Fetch ECU config + violations when the selected ECU changes
   useEffect(() => {
@@ -548,20 +548,13 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               </svg>
               {classLabel}
             </span>
-            <span className={`meta-item status-live ${isConnected ? "active" : ""}`} data-testid="connection-status">
+            <span className={`meta-item status-live ${ecuIsConnected ? "active" : ""}`} data-testid="connection-status">
               <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
                 <path d="M2 8c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M4.5 8c0-1.933 1.567-3.5 3.5-3.5S11.5 6.067 11.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <circle cx="8" cy="8" r="1.5" fill="currentColor" />
               </svg>
-              {isConnected ? "Live" : "Disconnected"}
-            </span>
-            <span className="meta-item">
-              <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
-                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
-                <path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-              {sessionTime}
+              {ecuIsConnected ? "Live" : "Disconnected"}
             </span>
           </div>
         </div>
@@ -757,7 +750,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           <div className="card-header">
             <span className="card-title">ECU Configuration</span>
             <div className="card-header-right">
-              <span className="card-serial">#{ecuData?.serial_number ?? "--"}</span>
+              <span className="card-serial">ECU #{ecuData?.id ?? "--"}</span>
               {onUnassign && (
                 <button className="btn-unassign" onClick={onUnassign} title="Unassign ECU from team">
                   Unassign ECU
@@ -769,10 +762,19 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           <form className="config-form" onSubmit={handleConfigSubmit}>
             <div className="form-row">
               <div className="form-field">
-                <label>ECU Serial Number</label>
+                <label>ECU ID</label>
                 <input
                   type="text"
-                  value={ecuData?.serial_number ?? ""}
+                  value={ecuData?.id ?? ""}
+                  readOnly
+                  className="form-input readonly"
+                />
+              </div>
+              <div className="form-field">
+                <label>MAC Address</label>
+                <input
+                  type="text"
+                  value={ecuData?.mac_address ?? ""}
                   readOnly
                   className="form-input readonly"
                 />

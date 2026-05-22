@@ -23,8 +23,8 @@ async def persist_and_broadcast_frame(db: Session, processed: dict[str, Any]) ->
 
     violation_update = track_power_violation(db, frame, ecu=None)
 
-    if violation_update.event is not None and violation_update.transition in {"started", "ended"}:
-        await manager.notify_violation_event(violation_update.event, violation_update.transition)
+    if violation_update.event is not None and violation_update.transition in {"started", "escalated", "ended"}:
+        await manager.notify_violation_event(violation_update.event, violation_update.transition, team_id=violation_update.team_id)
 
     frame_data = EnergyFrameResponse.model_validate(frame).model_dump(mode="json")
 
