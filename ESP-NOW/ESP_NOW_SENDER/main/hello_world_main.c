@@ -21,7 +21,7 @@ static const char *TAG = "SENDER";
 #define GAIN                        1
 #define ADC_CURRENT_HIGH_CHANNEL    ADC_CHANNEL_4
 #define ADC_CURRENT_LOW_CHANNEL     ADC_CHANNEL_7
-#define CURRENT_RANGE_SWITCH_MV     10000
+#define CURRENT_RANGE_SWITCH_MV     1000
 #define ADC_VOLTAGE_CHANNEL         ADC_CHANNEL_6
 #define SAMPLES_PER_FRAME           10
 #define MAX_FRAMES_PER_PKT          3
@@ -140,8 +140,8 @@ static volatile uint16_t ring_read  = 0;
 static SemaphoreHandle_t ring_mutex;
 
 //Sleep Mode
-#define SLEEP_VOLTAGE_THRESH_MV  150
-#define SLEEP_CURRENT_THRESH_MA  150
+#define SLEEP_VOLTAGE_THRESH_MV  200
+#define SLEEP_CURRENT_THRESH_MA  200
 #define SLEEP_ENTRY_MS           30000
 
 static volatile bool modem_sleeping     = false;
@@ -468,15 +468,22 @@ void adc_task(void *arg) {
         if (now - last_sample_time >= SAMPLE_PERIOD_MS) {
             last_sample_time = now;
             int raw_c_high, raw_c_low, raw_v, mv_c, mv_v;
+            bool is_c_low;
             ESP_ERROR_CHECK(adc_oneshot_read(
                 adc1_handle, ADC_CURRENT_HIGH_CHANNEL, &raw_c_high));
             adc_cali_raw_to_voltage(adc1_cali_current_high, raw_c_high, &mv_c);
+            //is_c_low = false;
 
             if (mv_c < CURRENT_RANGE_SWITCH_MV) {
                 ESP_ERROR_CHECK(adc_oneshot_read(
                     adc1_handle, ADC_CURRENT_LOW_CHANNEL, &raw_c_low));
                 adc_cali_raw_to_voltage(adc1_cali_current_low, raw_c_low, &mv_c);
+                //is_c_low = true;
             }
+
+            /*if (is_c_low) {
+                mv_c = 100;
+            */}
 
             ESP_ERROR_CHECK(adc_oneshot_read(
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
@@ -534,6 +541,9 @@ void adc_task(void *arg) {
                 if (modem_sleeping) {
                     modem_sleeping = false;
                     esp_wifi_set_ps(WIFI_PS_NONE);
+                    waiting_ack    = false;
+                    last_send_time = 0;
+                    confirmed_floor = next_counter - 1;
                     ESP_LOGI(TAG, "Modem sleep EXIT — V=%d mV, I=%d mV", mv_v, mv_c);
                 }
             }
