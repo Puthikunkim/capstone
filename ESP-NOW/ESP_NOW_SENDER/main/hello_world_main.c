@@ -18,13 +18,15 @@
 static const char *TAG = "SENDER";
 
 // ====== Config ======
-#define GAIN                  1
-#define ADC_CURRENT_CHANNEL   ADC_CHANNEL_6
-#define ADC_VOLTAGE_CHANNEL   ADC_CHANNEL_7
-#define SAMPLES_PER_FRAME     10
-#define MAX_FRAMES_PER_PKT    3
-#define SENDER_BUFFER_SIZE    3000
-#define ACK_TIMEOUT_MS        200
+#define GAIN                        1
+#define ADC_CURRENT_HIGH_CHANNEL    ADC_CHANNEL_4
+#define ADC_CURRENT_LOW_CHANNEL     ADC_CHANNEL_7
+#define CURRENT_RANGE_SWITCH_MV     10000
+#define ADC_VOLTAGE_CHANNEL         ADC_CHANNEL_6
+#define SAMPLES_PER_FRAME           10
+#define MAX_FRAMES_PER_PKT          3
+#define SENDER_BUFFER_SIZE          3000
+#define ACK_TIMEOUT_MS              200
 
 // ====== Msg type ======
 #define MSG_HELLO             0x01
@@ -114,9 +116,10 @@ static bool    time_synced        = false;
 
 // ====== ADC ======
 static adc_oneshot_unit_handle_t adc1_handle;
-static adc_cali_handle_t adc1_cali_current = NULL;
+static adc_cali_handle_t adc1_cali_current_low = NULL;
+static adc_cali_handle_t adc1_cali_current_high = NULL;
 static adc_cali_handle_t adc1_cali_voltage = NULL;
-static adc_channel_t channels[2] = {ADC_CURRENT_CHANNEL, ADC_VOLTAGE_CHANNEL};
+static adc_channel_t channels[3] = {ADC_CURRENT_HIGH_CHANNEL, ADC_CURRENT_LOW_CHANNEL, ADC_VOLTAGE_CHANNEL};
 
 void sender_task(void *arg);
 void adc_task(void *arg);
@@ -135,6 +138,14 @@ static raw_sample_t sample_ring[SAMPLE_RING_SIZE];
 static volatile uint16_t ring_write = 0;
 static volatile uint16_t ring_read  = 0;
 static SemaphoreHandle_t ring_mutex;
+
+//Sleep Mode
+#define SLEEP_VOLTAGE_THRESH_MV  150
+#define SLEEP_CURRENT_THRESH_MA  150
+#define SLEEP_ENTRY_MS           30000
+
+static volatile bool modem_sleeping     = false;
+static int64_t       below_thresh_since = 0;
 
 
 /*---------------------------------------------------------------
@@ -415,12 +426,14 @@ static void adc_init(void) {
     adc_oneshot_chan_cfg_t ch_cfg = {
         .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12
     };
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < 3; i++)
         ESP_ERROR_CHECK(adc_oneshot_config_channel(
             adc1_handle, channels[i], &ch_cfg));
     adc_calibration_init(ADC_UNIT_1, channels[0],
-                         ADC_ATTEN_DB_12, &adc1_cali_current);
+                         ADC_ATTEN_DB_12, &adc1_cali_current_high);
     adc_calibration_init(ADC_UNIT_1, channels[1],
+                         ADC_ATTEN_DB_12, &adc1_cali_current_low);
+    adc_calibration_init(ADC_UNIT_1, channels[2],
                          ADC_ATTEN_DB_12, &adc1_cali_voltage);
     ESP_LOGI(TAG, "ADC init done");
 }
@@ -454,10 +467,17 @@ void adc_task(void *arg) {
         // 100Hz sampling
         if (now - last_sample_time >= SAMPLE_PERIOD_MS) {
             last_sample_time = now;
-            int raw_c, raw_v, mv_c, mv_v;
+            int raw_c_high, raw_c_low, raw_v, mv_c, mv_v;
             ESP_ERROR_CHECK(adc_oneshot_read(
-                adc1_handle, ADC_CURRENT_CHANNEL, &raw_c));
-            adc_cali_raw_to_voltage(adc1_cali_current, raw_c, &mv_c);
+                adc1_handle, ADC_CURRENT_HIGH_CHANNEL, &raw_c_high));
+            adc_cali_raw_to_voltage(adc1_cali_current_high, raw_c_high, &mv_c);
+
+            if (mv_c < CURRENT_RANGE_SWITCH_MV) {
+                ESP_ERROR_CHECK(adc_oneshot_read(
+                    adc1_handle, ADC_CURRENT_LOW_CHANNEL, &raw_c_low));
+                adc_cali_raw_to_voltage(adc1_cali_current_low, raw_c_low, &mv_c);
+            }
+
             ESP_ERROR_CHECK(adc_oneshot_read(
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
@@ -491,6 +511,32 @@ void adc_task(void *arg) {
             sample_ring[slot].sampled_at = now;
             ring_write++;
             xSemaphoreGive(ring_mutex);
+
+            bool low_activity = (mv_v < SLEEP_VOLTAGE_THRESH_MV && 
+                     mv_c < SLEEP_CURRENT_THRESH_MA);
+            int64_t now_ms = esp_timer_get_time() / 1000;
+
+            if (low_activity) {
+                if (!modem_sleeping) {
+                    if (below_thresh_since == 0) {
+                        below_thresh_since = now_ms;
+                    }
+                    else if ((now_ms - below_thresh_since) >= SLEEP_ENTRY_MS) {
+                            modem_sleeping     = true;
+                            below_thresh_since = 0;
+                            esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+                            ESP_LOGI(TAG, "Modem sleep ENTER — V=%d mV, I=%d mV quiet for 30s", mv_v, mv_c);
+                    }
+                }
+            } else {
+                below_thresh_since = 0;  // reset timer on any active reading
+
+                if (modem_sleeping) {
+                    modem_sleeping = false;
+                    esp_wifi_set_ps(WIFI_PS_NONE);
+                    ESP_LOGI(TAG, "Modem sleep EXIT — V=%d mV, I=%d mV", mv_v, mv_c);
+                }
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
@@ -501,6 +547,7 @@ void sender_task(void *arg) {
     int16_t voltage_buf[SAMPLES_PER_FRAME];
     int     sample_index = 0;
     int64_t now = 0;
+    int64_t last_heartbeat_ms = 0;
 
     ESP_LOGI(TAG, "Sender task started");
 
@@ -520,7 +567,28 @@ void sender_task(void *arg) {
             buffer_push(current_buf, voltage_buf);
             sample_index = 0;
 
-            if (waiting_ack && (now - last_send_time > ACK_TIMEOUT_MS)) {
+            if (modem_sleeping) {
+                int64_t now_ms = esp_timer_get_time() / 1000;
+
+                if ((now_ms - last_heartbeat_ms) >= 5000) {
+                    esp_wifi_set_ps(WIFI_PS_NONE);          // wake radio
+                    vTaskDelay(pdMS_TO_TICKS(10));          // brief settle time
+
+                    adc_packet_t hb = {
+                        .msg_type    = MSG_DATA,
+                        .frame_count = 0
+                    };
+
+                    esp_now_send(controller_mac, (uint8_t *)&hb, sizeof(hb));
+                    ESP_LOGI(TAG, "Heartbeat sent");
+
+                    last_heartbeat_ms = now_ms;
+
+                    vTaskDelay(pdMS_TO_TICKS(20));          // let TX complete
+                    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);     // radio back to sleep
+                }
+
+            } else if (waiting_ack && (now - last_send_time > ACK_TIMEOUT_MS)) {
                 waiting_ack = false;
                 consecutive_timeouts++;
 
@@ -539,9 +607,7 @@ void sender_task(void *arg) {
                     ESP_LOGW(TAG, "ACK timeout (%d/%d), bundling with next frame",
                              consecutive_timeouts, DISCONNECT_THRESHOLD);
                 }
-            }
-
-            if (!waiting_ack) {
+            } else if (!waiting_ack) {
                 adc_packet_t pkt;
                 memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
