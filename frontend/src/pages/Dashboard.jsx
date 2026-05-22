@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import PropTypes from "prop-types";
 import { TelemetryChart, HistoryChart } from "../components/TelemetryChart";
 import { useTeamWebSocket } from "../hooks/useWebSocket";
@@ -532,6 +532,20 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     ? `${Math.round(ecuData.flash_usage / 1024)} KB`
     : "--";
 
+  // Cumulative energy (Wh) integrated from all history points via trapezoidal rule.
+  // historyPoints carries voltage + current per sample; power = V × I.
+  const totalEnergyWh = useMemo(() => {
+    const pts = historyPoints.filter((p) => p.voltage != null && p.current != null);
+    if (pts.length < 2) return null;
+    let wh = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const dt = (new Date(pts[i].timestamp) - new Date(pts[i - 1].timestamp)) / 3_600_000;
+      const avgPower = (pts[i - 1].voltage * pts[i - 1].current + pts[i].voltage * pts[i].current) / 2;
+      wh += avgPower * dt;
+    }
+    return wh;
+  }, [historyPoints]);
+
   return (
     <div className="dashboard">
       {/* ── Header ── */}
@@ -645,9 +659,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Energy"
-          value={lastSample?.energy != null ? lastSample.energy.toFixed(1) : null}
-          unit="Wh"
-          sub={lastSample?.energy != null ? "Latest frame" : "No data"}
+          value={totalEnergyWh != null ? Math.abs(totalEnergyWh) < 1 ? (totalEnergyWh * 1000).toFixed(2) : totalEnergyWh.toFixed(3) : null}
+          unit={totalEnergyWh != null && Math.abs(totalEnergyWh) < 1 ? "mWh" : "Wh"}
+          sub={totalEnergyWh != null ? "Cumulative (session)" : "No data"}
           subStyle="sub-muted"
         />
       </div>

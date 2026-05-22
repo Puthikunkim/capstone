@@ -71,6 +71,10 @@ export const updateEventParticipant = (participantId, payload) =>
     body: JSON.stringify(payload),
   });
 
+// ── Scoring / Leaderboard ─────────────────────────────────────────────
+export const fetchEventLeaderboard = (eventId) =>
+  request(`/scoring/event-leaderboard/${eventId}`);
+
 // ── Violations / Alerts ───────────────────────────────────────────────
 export const fetchViolations = (ecuId, limit = 50) =>
   request(`/violations?ecu_id=${ecuId}&limit=${limit}`);

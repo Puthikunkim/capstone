@@ -1011,7 +1011,8 @@ body {
 }
 .sidebar-team-card:hover { border-color: var(--border-light); background: var(--bg-card); }
 .sidebar-team-card.active { background: var(--accent-dim); border-color: var(--accent-glow); }
-.sidebar-team-card.no-ecu { cursor: default; opacity: 0.6; }
+.sidebar-team-card.no-ecu { cursor: default; opacity: 0.5; }
+.sidebar-team-card.no-ecu:hover { border-color: var(--border); background: var(--bg-input); }
 
 .team-card-top {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
@@ -1273,6 +1274,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  cursor: default;
+  user-select: none;
 }
 
 .ct-team-top {
@@ -1404,3 +1407,157 @@ body {
   font-size: 11px;
   color: var(--text-secondary);
 }
+
+/* ── Efficiency Leaderboard ──────────────────────────────────────── */
+.lb-page {
+  padding: 28px 32px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.lb-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+.lb-title { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.lb-subtitle { font-size: 13px; color: var(--text-secondary); }
+
+.lb-meta { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding-top: 4px; }
+.lb-updated { font-size: 11px; color: var(--text-muted); }
+.lb-refresh-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 6px var(--green);
+  animation: violation-pulse 2s ease-in-out infinite;
+}
+
+.lb-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.lb-empty--error { color: var(--red); }
+
+/* Table */
+.lb-table-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.lb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.lb-table th {
+  padding: 11px 14px;
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.lb-col-num { text-align: right !important; }
+.lb-col-rank { width: 64px; text-align: center !important; }
+.lb-col-energy { color: var(--accent) !important; }
+.lb-col-mac { font-family: monospace; }
+
+.lb-row { border-bottom: 1px solid var(--border); transition: background .15s; }
+.lb-row:last-child { border-bottom: none; }
+.lb-row:hover { background: rgba(255,255,255,.03); }
+
+.lb-row td {
+  padding: 12px 14px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.lb-team-name { font-weight: 600; }
+.lb-mac { font-size: 11px; color: var(--text-secondary); font-family: monospace; }
+.lb-energy { font-weight: 700; color: var(--accent); }
+
+/* Rank badge */
+.lb-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.lb-rank--gold   { background: rgba(234,179,8,.15);  color: #eab308; border-color: #eab308; }
+.lb-rank--silver { background: rgba(148,163,184,.12); color: #94a3b8; border-color: #94a3b8; }
+.lb-rank--bronze { background: rgba(180,83,9,.15);   color: #b45309; border-color: #b45309; }
+.lb-rank--none   { color: var(--text-muted); border-color: var(--border); }
+
+/* Pending / unscored section */
+.lb-pending-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.lb-pending-label {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.lb-pending-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.lb-pending-row:last-child { border-bottom: none; }
+
+.lb-status { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+.lb-status--scored  { background: var(--green-dim); color: var(--green); }
+.lb-status--pending { background: var(--gray-dim);  color: var(--text-secondary); }
+
+/* ── Leaderboard live indicator ──────────────────────────────────── */
+.lb-team-cell { display: flex; align-items: center; gap: 8px; }
+
+.lb-live-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid var(--green);
+  animation: violation-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.lb-row--live { background: rgba(34,197,94,.04); }
+.lb-row--live:hover { background: rgba(34,197,94,.07); }

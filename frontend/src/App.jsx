@@ -18,6 +18,7 @@ import { useViolationsWebSocket } from "./hooks/useWebSocket";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { AddTeamToCompetitionModal } from "./components/AddTeamToCompetitionModal";
 import { CompetitionTeamsPanel } from "./components/CompetitionTeamsPanel";
+import { LeaderboardPage } from "./pages/LeaderboardPage";
 import "./App.css";
 
 export default function App() {
@@ -302,6 +303,11 @@ export default function App() {
               teams={competitionTeams}
               ecuList={competitionEcus}
               onAddTeam={() => setShowAddTeam(true)}
+            />
+          ) : !selectedTeam ? (
+            <LeaderboardPage
+              eventId={selectedEvent.id}
+              eventType={selectedEvent.event_type}
             />
           ) : selectedTeam && !hasEcu ? (
             <div className="dashboard">

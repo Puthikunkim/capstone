@@ -51,3 +51,30 @@ class ScoringEventResponse(BaseModel):
     metric: ScoringMetric
     energy_source: ScoringEnergySource
     brackets: list[ScoringBracketResponse]
+
+
+class LeaderboardStatus(str, Enum):
+    SCORED = "scored"    # has frames, energy calculated
+    PENDING = "pending"  # has ECU but no frames yet
+    NO_ECU = "no_ecu"    # no ECU assigned — excluded from display
+
+
+class LeaderboardEntry(BaseModel):
+    rank: int | None
+    team_id: int
+    team_name: str
+    ecu_id: int | None
+    mac_address: str | None
+    energy_wh: float | None
+    avg_power_watts: float | None
+    duration_seconds: float | None
+    frame_count: int
+    status: LeaderboardStatus
+    is_live: bool
+    last_reading_at: datetime | None
+
+
+class EventLeaderboardResponse(BaseModel):
+    event_id: int
+    max_window_seconds: int
+    entries: list[LeaderboardEntry]
