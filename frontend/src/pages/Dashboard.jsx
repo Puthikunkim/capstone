@@ -24,13 +24,18 @@ function expandSingleFrame(frame, prevTimestamp) {
   const tEnd = new Date(frame.timestamp).getTime();
   const tStart = prevTimestamp ? new Date(prevTimestamp).getTime() : tEnd;
 
-  return Array.from({ length: n }, (_, j) => ({
-    timestamp: new Date(n === 1 ? tEnd : tStart + ((j + 1) / n) * (tEnd - tStart)).toISOString(),
-    voltage: voltages[j] ?? null,
-    current: currents[j] ?? null,
-    // carry energy on the last sample of each frame so stat cards can display it
-    energy: j === n - 1 ? (frame.energy ?? null) : undefined,
-  }));
+  return Array.from({ length: n }, (_, j) => {
+    const v = voltages[j] ?? null;
+    const c = currents[j] ?? null;
+    return {
+      timestamp: new Date(n === 1 ? tEnd : tStart + ((j + 1) / n) * (tEnd - tStart)).toISOString(),
+      voltage: v,
+      current: c,
+      power: v != null && c != null ? v * c : null,
+      // carry energy on the last sample of each frame so stat cards can display it
+      energy: j === n - 1 ? (frame.energy ?? null) : undefined,
+    };
+  });
 }
 
 // Expand a sorted array of frames into individual sample points.
@@ -270,6 +275,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const [monitoring, setMonitoring] = useState(true);
   const [voltageView, setVoltageView] = useState("live");
   const [currentView, setCurrentView] = useState("live");
+  const [powerView, setPowerView] = useState("live");
   const lastFrameTsRef = useRef(null); // timestamp of the last received frame
 
   // Config form state
@@ -342,6 +348,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       lastFrameTsRef.current = null;
       setVoltageView("live");
       setCurrentView("live");
+      setPowerView("live");
       return;
     }
 
@@ -350,6 +357,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     lastFrameTsRef.current = null;
     setVoltageView("live");
     setCurrentView("live");
+    setPowerView("live");
 
     const hasTimeRange = participant?.start != null && participant?.duration_seconds != null;
 
@@ -752,6 +760,50 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               color="#f59e0b"
               unit="A"
               label="Current"
+            />
+          )}
+        </div>
+
+        <div className="chart-section">
+          <div className="chart-section-header">
+            <h3>Power</h3>
+            <div className="chart-view-toggle">
+              <button
+                className={`chart-view-btn ${powerView === "live" ? "active" : ""}`}
+                onClick={() => setPowerView("live")}
+              >
+                Live
+              </button>
+              <button
+                className={`chart-view-btn ${powerView === "history" ? "active" : ""}`}
+                onClick={() => setPowerView("history")}
+              >
+                History
+              </button>
+            </div>
+          </div>
+          {powerView === "live" ? (
+            !isConnected && chartData.length === 0 ? (
+              <div className="chart-empty">
+                <p>Waiting for data stream</p>
+                <span>Start monitoring to see live data</span>
+              </div>
+            ) : (
+              <TelemetryChart
+                data={chartData}
+                dataKey="power"
+                color="#10b981"
+                unit="W"
+                label="Power"
+              />
+            )
+          ) : (
+            <HistoryChart
+              data={historyPoints}
+              dataKey="power"
+              color="#10b981"
+              unit="W"
+              label="Power"
             />
           )}
         </div>

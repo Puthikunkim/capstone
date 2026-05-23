@@ -10,12 +10,13 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-function formatRelativeTime(timestamp, oldestTimestamp) {
-  const diffMs = new Date(timestamp) - new Date(oldestTimestamp);
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffSec = Math.floor((diffMs % 60000) / 1000);
-  if (diffMin === 0) return `${diffSec}s`;
-  return diffSec === 0 ? `${diffMin}m` : `${diffMin}m${diffSec}s`;
+function formatAgo(diffMs) {
+  if (diffMs < 1000) return `-${(diffMs / 1000).toFixed(1)}s`;
+  const totalSec = Math.round(diffMs / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min === 0) return `-${sec}s`;
+  return sec === 0 ? `-${min}m` : `-${min}m${sec}s`;
 }
 
 const CHART_STYLE = {
@@ -40,13 +41,18 @@ export function TelemetryChart({ data, dataKey, color, unit, label }) {
     );
   }
 
-  const oldest = data[0].timestamp;
+  const newestMs = new Date(data[data.length - 1].timestamp).getTime();
   const chartData = data.map((point, i) => ({
     ...point,
-    time: i === data.length - 1 ? "Now" : formatRelativeTime(point.timestamp, oldest),
+    time: i === data.length - 1 ? "Now" : formatAgo(newestMs - new Date(point.timestamp).getTime()),
   }));
 
-  const tickInterval = Math.max(0, Math.floor(chartData.length / 8));
+  // Show a tick every ~1 second worth of samples, capped to ~8 ticks total.
+  const spanMs = newestMs - new Date(data[0].timestamp).getTime();
+  const msPerPoint = spanMs / Math.max(1, data.length - 1);
+  const pointsPerSec = msPerPoint > 0 ? Math.round(1000 / msPerPoint) : data.length;
+  const rawInterval = Math.max(1, pointsPerSec);
+  const tickInterval = Math.max(rawInterval, Math.floor(data.length / 8));
 
   const values = chartData.map((d) => d[dataKey]).filter((v) => v != null);
   const minVal = Math.min(...values);
