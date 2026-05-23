@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
 import { TelemetryChart, HistoryChart } from "../components/TelemetryChart";
 import { useTeamWebSocket } from "../hooks/useWebSocket";
@@ -40,6 +40,20 @@ function expandFrames(frames) {
     points.push(...expandSingleFrame(frames[i], i > 0 ? frames[i - 1].timestamp : null));
   }
   return points;
+}
+
+// Trapezoidal integration of V×I over time. O(n) in the number of points passed.
+// Call with a small slice (e.g. one frame delta) to keep per-frame cost O(1).
+function integratePointsWh(pts) {
+  let wh = 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].voltage == null || pts[i].current == null) continue;
+    if (pts[i - 1].voltage == null || pts[i - 1].current == null) continue;
+    const dt = (new Date(pts[i].timestamp) - new Date(pts[i - 1].timestamp)) / 3_600_000;
+    const avgPower = (pts[i - 1].voltage * pts[i - 1].current + pts[i].voltage * pts[i].current) / 2;
+    wh += avgPower * dt;
+  }
+  return wh;
 }
 
 // ── Small UI helpers ──────────────────────────────────────────────────
@@ -270,7 +284,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const [monitoring, setMonitoring] = useState(true);
   const [voltageView, setVoltageView] = useState("live");
   const [currentView, setCurrentView] = useState("live");
-  const lastFrameTsRef = useRef(null); // timestamp of the last received frame
+  const lastFrameTsRef = useRef(null);    // timestamp of the last received frame
+  const energyAccRef = useRef(0);         // running energy total (Wh)
+  const lastEnergyPointRef = useRef(null); // last sample point used in integration
+  const [totalEnergyWh, setTotalEnergyWh] = useState(null);
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -340,6 +357,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       setChartData([]);
       setHistoryPoints([]);
       lastFrameTsRef.current = null;
+      energyAccRef.current = 0;
+      lastEnergyPointRef.current = null;
+      setTotalEnergyWh(null);
       setVoltageView("live");
       setCurrentView("live");
       return;
@@ -348,6 +368,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     setChartData([]);
     setHistoryPoints([]);
     lastFrameTsRef.current = null;
+    energyAccRef.current = 0;
+    lastEnergyPointRef.current = null;
+    setTotalEnergyWh(null);
     setVoltageView("live");
     setCurrentView("live");
 
@@ -360,6 +383,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
           if (sorted.length > 0) lastFrameTsRef.current = sorted[sorted.length - 1].timestamp;
           const expanded = expandFrames(sorted);
+          const energy = integratePointsWh(expanded);
+          energyAccRef.current = energy;
+          lastEnergyPointRef.current = expanded[expanded.length - 1] ?? null;
+          setTotalEnergyWh(expanded.length > 0 ? energy : null);
           setHistoryPoints(expanded);
           setChartData(expanded.slice(-200));
         })
@@ -374,8 +401,13 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           const sortedLive = [...liveFrames].sort(sortFn);
           const sortedAll = [...allFrames].sort(sortFn);
           if (sortedLive.length > 0) lastFrameTsRef.current = sortedLive[sortedLive.length - 1].timestamp;
+          const expandedAll = expandFrames(sortedAll);
+          const energy = integratePointsWh(expandedAll);
+          energyAccRef.current = energy;
+          lastEnergyPointRef.current = expandedAll[expandedAll.length - 1] ?? null;
+          setTotalEnergyWh(expandedAll.length > 0 ? energy : null);
           setChartData(expandFrames(sortedLive).slice(-200));
-          setHistoryPoints(expandFrames(sortedAll));
+          setHistoryPoints(expandedAll);
         })
         .catch(() => {});
     }
@@ -392,12 +424,21 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     return () => clearInterval(id);
   }, [selectedEcuId, isConnected]);
 
-  // Expand incoming live frame into sample points and append to charts
+  // Expand incoming live frame into sample points, append to charts, and
+  // accumulate energy incrementally — O(samples-per-frame) instead of O(all history).
   useEffect(() => {
     if (!liveData) return;
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
+
+    // Integrate only the delta: [last known point, ...new points]
+    const anchor = lastEnergyPointRef.current;
+    const delta = integratePointsWh(anchor ? [anchor, ...newPoints] : newPoints);
+    energyAccRef.current += delta;
+    lastEnergyPointRef.current = newPoints[newPoints.length - 1] ?? anchor;
+    setTotalEnergyWh(energyAccRef.current);
+
     setChartData((prev) => {
       const next = [...prev, ...newPoints];
       return next.length > 200 ? next.slice(-200) : next;
@@ -532,19 +573,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     ? `${Math.round(ecuData.flash_usage / 1024)} KB`
     : "--";
 
-  // Cumulative energy (Wh) integrated from all history points via trapezoidal rule.
-  // historyPoints carries voltage + current per sample; power = V × I.
-  const totalEnergyWh = useMemo(() => {
-    const pts = historyPoints.filter((p) => p.voltage != null && p.current != null);
-    if (pts.length < 2) return null;
-    let wh = 0;
-    for (let i = 1; i < pts.length; i++) {
-      const dt = (new Date(pts[i].timestamp) - new Date(pts[i - 1].timestamp)) / 3_600_000;
-      const avgPower = (pts[i - 1].voltage * pts[i - 1].current + pts[i].voltage * pts[i].current) / 2;
-      wh += avgPower * dt;
-    }
-    return wh;
-  }, [historyPoints]);
 
   return (
     <div className="dashboard">
