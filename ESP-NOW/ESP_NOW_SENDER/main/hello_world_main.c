@@ -606,7 +606,7 @@ void adc_task(void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
-            int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
+            int32_t power_mw = ((int32_t)(mv_v * 25 + 264) * mv_c) / 1000;
             if (power_mw > power_threshold_mw) {
                 if (!over_power_flag) {
                     over_power_flag     = true;
@@ -692,7 +692,7 @@ void sender_task(void *arg) {
         while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
             uint16_t slot = ring_read % SAMPLE_RING_SIZE;
             current_buf[sample_index] = sample_ring[slot].current_mv;
-            voltage_buf[sample_index] = (uint32_t)sample_ring[slot].voltage_mv * 25;
+            voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv * 25 );
             now = sample_ring[slot].sampled_at;
             sample_index++;
             ring_read++;
