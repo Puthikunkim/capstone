@@ -32,6 +32,7 @@ static const char *TAG = "SENDER";
 #define SENDER_BUFFER_SIZE          2000
 #define ACK_TIMEOUT_MS              200
 #define BUZZER_GPIO                 GPIO_NUM_19
+#define BUZZER_BEEP_HALF_MS         125
 #define BUZZER_LEDC_TIMER           LEDC_TIMER_0
 #define BUZZER_LEDC_CHANNEL         LEDC_CHANNEL_0
 #define BUZZER_FREQ_HZ              2000
