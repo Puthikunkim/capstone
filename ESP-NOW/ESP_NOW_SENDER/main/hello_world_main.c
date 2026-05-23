@@ -67,7 +67,7 @@ typedef struct {
     uint16_t counter;
     int64_t  tx_epoch_us;  // UTC microseconds since epoch, computed by sender at capture time
     int16_t  current_mv[SAMPLES_PER_FRAME];
-    int16_t  voltage_mv[SAMPLES_PER_FRAME];
+    uint32_t voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
 
 typedef struct {
@@ -92,7 +92,7 @@ typedef struct {
     uint16_t counter;
     uint32_t time_100ms;  // uint16_t overflowed at ~109 min boot time
     int16_t  current_mv[SAMPLES_PER_FRAME];
-    int16_t  voltage_mv[SAMPLES_PER_FRAME];
+    uint32_t voltage_mv[SAMPLES_PER_FRAME];
 } buffered_frame_t;
 
 static buffered_frame_t send_buffer[SENDER_BUFFER_SIZE];
@@ -325,7 +325,7 @@ static void flash_init(void) {
 /*---------------------------------------------------------------
     Buffer management
 ---------------------------------------------------------------*/
-static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
+static void buffer_push(int16_t *current_mv, uint32_t *voltage_mv) {
     uint16_t slot = next_counter % SENDER_BUFFER_SIZE;
     buffered_frame_t *f = &send_buffer[slot];
 
@@ -599,7 +599,7 @@ void adc_task(void *arg) {
             }
 
             /*if (is_c_low) {
-                mv_c = 100;}
+                mv_c = 100;
             */
 
             ESP_ERROR_CHECK(adc_oneshot_read(
@@ -679,8 +679,8 @@ void adc_task(void *arg) {
 }
 
 void sender_task(void *arg) {
-    int16_t current_buf[SAMPLES_PER_FRAME];
-    int16_t voltage_buf[SAMPLES_PER_FRAME];
+    int16_t  current_buf[SAMPLES_PER_FRAME];
+    uint32_t voltage_buf[SAMPLES_PER_FRAME];
     int     sample_index = 0;
     int64_t now = 0;
     int64_t last_heartbeat_ms = 0;
@@ -692,7 +692,7 @@ void sender_task(void *arg) {
         while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
             uint16_t slot = ring_read % SAMPLE_RING_SIZE;
             current_buf[sample_index] = sample_ring[slot].current_mv;
-            voltage_buf[sample_index] = sample_ring[slot].voltage_mv;
+            voltage_buf[sample_index] = (uint32_t)sample_ring[slot].voltage_mv * 25;
             now = sample_ring[slot].sampled_at;
             sample_index++;
             ring_read++;

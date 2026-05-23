@@ -59,7 +59,7 @@ typedef struct {
     uint16_t counter;
     int64_t  tx_epoch_us;  // UTC microseconds since epoch, computed by sender
     int16_t  current_mv[SAMPLES_PER_FRAME];
-    int16_t  voltage_mv[SAMPLES_PER_FRAME];
+    uint32_t voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
 
 typedef struct {
@@ -296,7 +296,7 @@ static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, u
 
         for (int i = 0; i < SAMPLES_PER_FRAME; i++)
             pos += snprintf(buf + pos, sizeof(buf) - pos,
-                            "%d%s", frame->voltage_mv[i],
+                            "%lu%s", frame->voltage_mv[i],
                             i < SAMPLES_PER_FRAME - 1 ? "," : "");
 
         pos += snprintf(buf + pos, sizeof(buf) - pos, "],\"current\":[");
