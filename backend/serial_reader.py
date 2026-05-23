@@ -36,7 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 SAMPLES = 10
-MAX_FRAMES = 31
+MAX_FRAMES = 3
 
 # ---------------------------------------------------------------------------
 # Outbound write queue
@@ -250,7 +250,7 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
                         ser.flush()
                         logger.info("Time sync sent: %s", ts)
                     else:
-                        logger.debug("Ignoring non-JSON line: %r", line[:80])
+                        logger.info("RX non-JSON: %r", line[:120])
                     continue
                 packet = parse_packet(line)
                 if packet is None:
