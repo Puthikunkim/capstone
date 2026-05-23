@@ -14,6 +14,8 @@
 #include "esp_adc/adc_cali_scheme.h"
 
 #include <time.h>
+#include "esp_spiffs.h"
+#include "nvs.h"
 
 static const char *TAG = "SENDER";
 
@@ -52,7 +54,7 @@ typedef struct {
 
 typedef struct {
     uint16_t counter;
-    uint32_t time_since_boot_ms;
+    int64_t  tx_epoch_us;  // UTC microseconds since epoch, computed by sender at capture time
     int16_t  current_mv[SAMPLES_PER_FRAME];
     int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
@@ -87,8 +89,11 @@ static uint16_t next_counter     = 0;
 static uint16_t confirmed_floor  = 0;
 
 // ====== Power limit state ======
-// -1 means not yet received from the controller
-static volatile int32_t power_threshold_mw = -1;
+// Start with 10 kW so the over-power flag never fires before the controller
+// delivers a real limit.  Replaced by MSG_POWER_LIMIT whenever the backend
+// pushes one via the controller.
+#define DEFAULT_POWER_LIMIT_MW  10000000L
+static volatile int32_t power_threshold_mw = DEFAULT_POWER_LIMIT_MW;
 static volatile bool    over_power_flag    = false;
 
 // ====== Status ======
@@ -98,11 +103,20 @@ static bool     registered       = false;
 static volatile bool waiting_ack = false;
 static volatile int64_t last_send_time = 0;
 
+static TaskHandle_t adc_task_handle    = NULL;
+static TaskHandle_t sender_task_handle = NULL;
+
 static bool     is_disconnected        = false;
 static int64_t  disconnect_time_ms     = 0;
 static uint16_t disconnect_first_frame = 0;
 static uint8_t  consecutive_timeouts   = 0;
-#define DISCONNECT_THRESHOLD  3
+#define DISCONNECT_THRESHOLD  10
+
+// ====== Flash persistence ======
+#define FLASH_FILE           "/spiffs/frames.bin"
+#define FLASH_NVS_NS         "sender_state"
+#define FLASH_KEY_CONF_FLOOR "conf_floor"
+#define FLASH_KEY_BASE_CTR   "base_ctr"
 
 // ====== Time sync state ======
 // sync_base_us precomputed once at WELCOME so the hot path in
@@ -136,6 +150,11 @@ static volatile uint16_t ring_write = 0;
 static volatile uint16_t ring_read  = 0;
 static SemaphoreHandle_t ring_mutex;
 
+static FILE            *flash_fp       = NULL;
+static uint16_t         flash_base_ctr = 0;
+static nvs_handle_t     flash_nvs;
+static SemaphoreHandle_t flash_mutex;
+
 
 /*---------------------------------------------------------------
     Power limit enforcement placeholder.
@@ -149,26 +168,109 @@ static void on_power_limit_received(int32_t limit_mw) {
 }
 
 /*---------------------------------------------------------------
-    Compute real ISO timestamp for a given frame.
-    frame_boot_us: the esp_timer value when the frame was sampled.
-    Hot path: 3 integer ops only (sync_base_us precomputed at WELCOME).
+    Format a precomputed UTC epoch (microseconds since Unix epoch)
+    as an ISO-8601 string.  epoch_us == 0 → epoch fallback string.
 ---------------------------------------------------------------*/
-static void compute_frame_timestamp(int64_t frame_boot_us,
+static void compute_frame_timestamp(int64_t epoch_us,
                                     char *out, size_t len) {
-    if (!time_synced) {
+    if (epoch_us == 0) {
         strncpy(out, "1970-01-01T00:00:00.000000", len);
         return;
     }
 
-    int64_t total_us  = sync_base_us + (frame_boot_us - sync_boot_us);
-    time_t  final_sec = total_us / 1000000LL;
-    int     final_us  = (int)(total_us % 1000000LL);
+    time_t  final_sec = epoch_us / 1000000LL;
+    int     final_us  = (int)(epoch_us % 1000000LL);
 
     struct tm *final_tm = gmtime(&final_sec);
     snprintf(out, len,
              "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
              final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
              final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
+}
+
+/*---------------------------------------------------------------
+    Flash persistence
+---------------------------------------------------------------*/
+
+static void flash_save_frame(const buffered_frame_t *f) {
+    if (!flash_fp) return;
+    xSemaphoreTake(flash_mutex, portMAX_DELAY);
+    fwrite(f, sizeof(buffered_frame_t), 1, flash_fp);
+    if (f->counter % 10 == 0)
+        fflush(flash_fp);
+    xSemaphoreGive(flash_mutex);
+}
+
+static void flash_update_floor(uint16_t floor) {
+    xSemaphoreTake(flash_mutex, portMAX_DELAY);
+    nvs_set_u16(flash_nvs, FLASH_KEY_CONF_FLOOR, floor);
+    nvs_commit(flash_nvs);
+    // All frames confirmed: clear the file to reclaim space
+    if (floor == (uint16_t)(next_counter - 1) && flash_fp) {
+        fclose(flash_fp);
+        remove(FLASH_FILE);
+        flash_fp = fopen(FLASH_FILE, "ab");
+        flash_base_ctr = next_counter;
+        nvs_set_u16(flash_nvs, FLASH_KEY_BASE_CTR, flash_base_ctr);
+        nvs_commit(flash_nvs);
+        ESP_LOGI(TAG, "Flash: fully confirmed, file reset (base=%d)", flash_base_ctr);
+    }
+    xSemaphoreGive(flash_mutex);
+}
+
+// Called once at boot (after nvs_flash_init via wifi_init).
+// Mounts SPIFFS, restores ring buffer from flash, then opens log for append.
+static void flash_init(void) {
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path              = "/spiffs",
+        .partition_label        = NULL,
+        .max_files              = 3,
+        .format_if_mount_failed = true,
+    };
+    if (esp_vfs_spiffs_register(&conf) != ESP_OK) {
+        ESP_LOGE(TAG, "SPIFFS mount failed — flash persistence disabled");
+        return;
+    }
+    if (nvs_open(FLASH_NVS_NS, NVS_READWRITE, &flash_nvs) != ESP_OK) {
+        ESP_LOGE(TAG, "NVS open failed — flash persistence disabled");
+        return;
+    }
+
+    uint16_t saved_floor = 0;
+    nvs_get_u16(flash_nvs, FLASH_KEY_CONF_FLOOR, &saved_floor);
+    nvs_get_u16(flash_nvs, FLASH_KEY_BASE_CTR,   &flash_base_ctr);
+
+    // Load unconfirmed frames back into the ring buffer
+    FILE *f = fopen(FLASH_FILE, "rb");
+    if (f) {
+        buffered_frame_t frame;
+        uint16_t max_ctr = saved_floor;
+        uint16_t loaded  = 0;
+        while (fread(&frame, sizeof(buffered_frame_t), 1, f) == 1) {
+            if ((int16_t)(frame.counter - saved_floor) > 0) {
+                send_buffer[frame.counter % SENDER_BUFFER_SIZE] = frame;
+                if ((int16_t)(frame.counter - max_ctr) > 0)
+                    max_ctr = frame.counter;
+                loaded++;
+            }
+        }
+        fclose(f);
+        if (loaded > 0) {
+            confirmed_floor = saved_floor;
+            next_counter    = max_ctr + 1;
+            ESP_LOGI(TAG, "Restored %d frames from flash (floor=%d  next=%d)",
+                     loaded, confirmed_floor, next_counter);
+        }
+    }
+
+    flash_fp = fopen(FLASH_FILE, "ab");
+    if (!flash_fp) {
+        ESP_LOGE(TAG, "Failed to open flash log for append");
+        return;
+    }
+    size_t total = 0, used = 0;
+    esp_spiffs_info(NULL, &total, &used);
+    ESP_LOGI(TAG, "Flash ready — SPIFFS %u / %u bytes used", used, total);
 }
 
 /*---------------------------------------------------------------
@@ -218,12 +320,14 @@ static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
     if ((next_counter - confirmed_floor) >= SENDER_BUFFER_SIZE)
         confirmed_floor = next_counter - SENDER_BUFFER_SIZE + 1;
 
+    flash_save_frame(f);
     next_counter++;
 }
 
 static void buffer_clear_acked(uint16_t floor) {
     confirmed_floor      = floor;
     consecutive_timeouts = 0;
+    flash_update_floor(floor);
 
     if (is_disconnected) {
         is_disconnected = false;
@@ -250,7 +354,9 @@ static uint8_t build_packet(adc_packet_t *pkt) {
         adc_frame_t *dst = &pkt->frames[pkt->frame_count++];
 
         dst->counter = f->counter;
-        dst->time_since_boot_ms = (uint32_t)f->time_100ms * 100;
+        int64_t frame_boot_us = (int64_t)f->time_100ms * 100000LL;
+        int64_t epoch = time_synced ? (sync_base_us + (frame_boot_us - sync_boot_us)) : 0LL;
+        dst->tx_epoch_us = (epoch > 0) ? epoch : 0LL;
 
         uint16_t tmp_current[SAMPLES_PER_FRAME];
         uint16_t tmp_voltage[SAMPLES_PER_FRAME];
@@ -328,6 +434,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     if (msg_type == MSG_WELCOME && len == sizeof(welcome_packet_t)) {
         const welcome_packet_t *welcome = (const welcome_packet_t *)data;
         registered = true;
+        consecutive_timeouts = 0;
 
         // Anchor real wall-clock time from the controller's timestamp
         strncpy(sync_timestamp, welcome->sync_timestamp, sizeof(sync_timestamp));
@@ -356,8 +463,10 @@ static void on_data_recv(const esp_now_recv_info_t *info,
 
         ESP_LOGI(TAG, "Registered! sync time = %s", sync_timestamp);
 
-        xTaskCreate(adc_task,    "adc_task",    4096, NULL, 6, NULL);
-        xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, NULL);
+        if (adc_task_handle == NULL)
+            xTaskCreate(adc_task,    "adc_task",    4096, NULL, 6, &adc_task_handle);
+        if (sender_task_handle == NULL)
+            xTaskCreate(sender_task, "sender_task", 4096, NULL, 5, &sender_task_handle);
         return;
     }
 
@@ -426,7 +535,12 @@ static void adc_init(void) {
 }
 
 static void wifi_init(void) {
-    nvs_flash_init();
+    esp_err_t nvs_ret = nvs_flash_init();
+    if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS corrupted, erasing and reinitialising");
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
     esp_netif_init();
     esp_event_loop_create_default();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -462,25 +576,22 @@ void adc_task(void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
-            // Power threshold check — only active once limit has been received
-            if (power_threshold_mw > 0) {
-                int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
-                if (power_mw > power_threshold_mw) {
-                    if (!over_power_flag) {
-                        over_power_flag = true;
-                        ESP_LOGE(TAG,
-                                 "OVER POWER: %ld mW > threshold %ld mW "
-                                 "(V=%d mV, I=%d mV)",
-                                 power_mw, power_threshold_mw,
-                                 (int16_t)mv_v, (int16_t)mv_c);
-                    }
-                } else {
-                    if (over_power_flag) {
-                        over_power_flag = false;
-                        ESP_LOGI(TAG,
-                                 "Power back to normal: %ld mW <= threshold %ld mW",
-                                 power_mw, power_threshold_mw);
-                    }
+            int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
+            if (power_mw > power_threshold_mw) {
+                if (!over_power_flag) {
+                    over_power_flag = true;
+                    ESP_LOGE(TAG,
+                             "OVER POWER: %ld mW > threshold %ld mW "
+                             "(V=%d mV, I=%d mV)",
+                             power_mw, power_threshold_mw,
+                             (int16_t)mv_v, (int16_t)mv_c);
+                }
+            } else {
+                if (over_power_flag) {
+                    over_power_flag = false;
+                    ESP_LOGI(TAG,
+                             "Power back to normal: %ld mW <= threshold %ld mW",
+                             power_mw, power_threshold_mw);
                 }
             }
 
@@ -541,23 +652,22 @@ void sender_task(void *arg) {
                 }
             }
 
-            if (!waiting_ack) {
+            if (!waiting_ack && registered) {
                 adc_packet_t pkt;
                 memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
                 if (count > 0) {
-                    if (time_synced) {
+                    if (pkt.frames[0].tx_epoch_us != 0) {
                         char ts[32];
-                        int64_t frame_us =
-                            (int64_t)pkt.frames[0].time_since_boot_ms * 1000LL;
-                        compute_frame_timestamp(frame_us, ts, sizeof(ts));
+                        compute_frame_timestamp(pkt.frames[0].tx_epoch_us, ts, sizeof(ts));
                         ESP_LOGI(TAG, "Sent %d frame(s), counter %d~%d, first ts: %s",
                                  count,
                                  pkt.frames[0].counter,
                                  pkt.frames[count - 1].counter,
                                  ts);
                     }
-                    esp_now_send(controller_mac, (uint8_t *)&pkt, sizeof(pkt));
+                    esp_now_send(controller_mac, (uint8_t *)&pkt,
+                                 2 + count * sizeof(adc_frame_t));
                     waiting_ack    = true;
                     last_send_time = now;
                 }
@@ -635,14 +745,16 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
 
-    wifi_init();
+    wifi_init();   // initialises NVS via nvs_flash_init()
     adc_init();
+    flash_init();  // mount SPIFFS and restore buffered frames from previous session
 
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
-    ring_mutex = xSemaphoreCreateMutex();
+    ring_mutex  = xSemaphoreCreateMutex();
+    flash_mutex = xSemaphoreCreateMutex();
     esp_now_register_send_cb(on_data_sent);
     esp_now_register_recv_cb(on_data_recv);
 

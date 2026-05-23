@@ -57,7 +57,7 @@ typedef struct {
 
 typedef struct {
     uint16_t counter;
-    uint32_t time_since_boot_ms;
+    int64_t  tx_epoch_us;  // UTC microseconds since epoch, computed by sender
     int16_t  current_mv[SAMPLES_PER_FRAME];
     int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } __attribute__((packed)) adc_frame_t;
@@ -100,6 +100,7 @@ static uint8_t      my_mac[6];
 // ====== Time sync state ======
 static char    controller_sync_timestamp[32] = "";
 static int64_t controller_sync_boot_us       = 0;
+static int64_t controller_sync_base_us       = 0;  // epoch-us at sync moment, precomputed once
 static bool    time_synced                   = false;
 
 // uart_mutex: prevents uart_send_json and uart_listener_task from
@@ -149,6 +150,23 @@ static void request_time_from_backend(void) {
                 strncpy(controller_sync_timestamp, start, len);
                 controller_sync_timestamp[len] = '\0';
                 controller_sync_boot_us = esp_timer_get_time();
+
+                // Precompute epoch-us so per-frame timestamp math is just arithmetic
+                char base_no_us[32];
+                int  base_us = 0;
+                char *dot = strchr(controller_sync_timestamp, '.');
+                if (dot) {
+                    size_t blen = dot - controller_sync_timestamp;
+                    strncpy(base_no_us, controller_sync_timestamp, blen);
+                    base_no_us[blen] = '\0';
+                    base_us = atoi(dot + 1);
+                } else {
+                    strncpy(base_no_us, controller_sync_timestamp, sizeof(base_no_us));
+                }
+                struct tm tm_b = {0};
+                strptime(base_no_us, "%Y-%m-%dT%H:%M:%S", &tm_b);
+                controller_sync_base_us = (int64_t)mktime(&tm_b) * 1000000LL + base_us;
+
                 time_synced = true;
                 ESP_LOGI(TAG, "Time synced: %s", controller_sync_timestamp);
                 return;
@@ -160,6 +178,22 @@ static void request_time_from_backend(void) {
 }
 
 /*---------------------------------------------------------------
+    Format an epoch-us value as an ISO timestamp string.
+---------------------------------------------------------------*/
+static void _format_us(int64_t total_us, char *out, size_t len) {
+    time_t final_sec     = total_us / 1000000LL;
+    int    final_us      = (int)(total_us % 1000000LL);
+    struct tm *final_tm  = gmtime(&final_sec);
+    if (!final_tm) {
+        strncpy(out, "1970-01-01T00:00:00.000000", len);
+        return;
+    }
+    snprintf(out, len, "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
+             final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
+             final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
+}
+
+/*---------------------------------------------------------------
     Compute current real timestamp as ISO string.
 ---------------------------------------------------------------*/
 static void get_current_timestamp(char *out, size_t len) {
@@ -167,34 +201,20 @@ static void get_current_timestamp(char *out, size_t len) {
         strncpy(out, "1970-01-01T00:00:00.000000", len);
         return;
     }
+    _format_us(controller_sync_base_us + (esp_timer_get_time() - controller_sync_boot_us),
+               out, len);
+}
 
-    int64_t elapsed_us = esp_timer_get_time() - controller_sync_boot_us;
-
-    char base_no_us[32];
-    int us = 0;
-    char *dot = strchr(controller_sync_timestamp, '.');
-    if (dot) {
-        size_t base_len = dot - controller_sync_timestamp;
-        strncpy(base_no_us, controller_sync_timestamp, base_len);
-        base_no_us[base_len] = '\0';
-        us = atoi(dot + 1);
-    } else {
-        strncpy(base_no_us, controller_sync_timestamp, sizeof(base_no_us));
+/*---------------------------------------------------------------
+    Format a sender-computed UTC epoch (microseconds since Unix epoch)
+    as an ISO-8601 string.  tx_epoch_us == 0 → epoch fallback string.
+---------------------------------------------------------------*/
+static void get_frame_timestamp(int64_t tx_epoch_us, char *out, size_t len) {
+    if (tx_epoch_us == 0) {
+        strncpy(out, "1970-01-01T00:00:00.000000", len);
+        return;
     }
-
-    struct tm tm_base = {0};
-    strptime(base_no_us, "%Y-%m-%dT%H:%M:%S", &tm_base);
-    time_t base_epoch = mktime(&tm_base);
-
-    int64_t total_us  = (int64_t)base_epoch * 1000000LL + us + elapsed_us;
-    time_t  final_sec = total_us / 1000000LL;
-    int     final_us  = (int)(total_us % 1000000LL);
-
-    struct tm *final_tm = gmtime(&final_sec);
-    snprintf(out, len,
-             "%04d-%02d-%02dT%02d:%02d:%02d.%06d",
-             final_tm->tm_year + 1900, final_tm->tm_mon + 1, final_tm->tm_mday,
-             final_tm->tm_hour, final_tm->tm_min, final_tm->tm_sec, final_us);
+    _format_us(tx_epoch_us, out, len);
 }
 
 /*---------------------------------------------------------------
@@ -256,11 +276,8 @@ static void add_peer(const uint8_t *mac) {
 ---------------------------------------------------------------*/
 
 static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, uint32_t rx_time_ms) {
-    char buf[600];
-    char ts[27];
+    static char buf[6144]; /* static: BSS, not stack; safe because uart_mutex serializes callers */
     int pos = 0;
-
-    get_current_timestamp(ts, sizeof(ts));
 
     pos += snprintf(buf + pos, sizeof(buf) - pos,
                     "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"rx_time_ms\":%lu,\"frames\":[",
@@ -270,6 +287,8 @@ static void uart_send_json(const adc_packet_t *pkt, const uint8_t *sender_mac, u
 
     for (int f = 0; f < pkt->frame_count; f++) {
         const adc_frame_t *frame = &pkt->frames[f];
+        char ts[27];
+        get_frame_timestamp(frame->tx_epoch_us, ts, sizeof(ts));
 
         pos += snprintf(buf + pos, sizeof(buf) - pos,
                         "{\"counter\":%d,\"tx_time_ms\":\"%s\",\"voltage\":[",
@@ -387,6 +406,11 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         node_state_t *node = register_node(info->src_addr);
         if (!node) return;
 
+        if (!time_synced) {
+            ESP_LOGW(TAG, "REGISTER received but time not synced yet, ignoring");
+            return;
+        }
+
         welcome_packet_t welcome = {
             .msg_type = MSG_WELCOME,
         };
@@ -401,7 +425,7 @@ static void on_data_recv(const esp_now_recv_info_t *info,
     }
 
     // ── DATA: ADC frame ──
-    if (msg_type == MSG_DATA && len == sizeof(adc_packet_t)) {
+    if (msg_type == MSG_DATA && len >= 2) {
         const adc_packet_t *pkt = (const adc_packet_t *)data;
         uint32_t rx_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
@@ -521,17 +545,22 @@ void app_main(void) {
 
     uart_mutex = xSemaphoreCreateMutex();
 
-    request_time_from_backend();
-
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
         return;
     }
+
     esp_now_register_recv_cb(on_data_recv);
 
-    xTaskCreate(hello_task,         "hello",        2048, NULL, 3, NULL);
-    xTaskCreate(watchdog_task,      "watchdog",     2048, NULL, 2, NULL);
-    xTaskCreate(uart_listener_task, "uart_listen",  4096, NULL, 4, NULL);
+    xTaskCreate(hello_task,    "hello",    2048, NULL, 3, NULL);
+    xTaskCreate(watchdog_task, "watchdog", 2048, NULL, 2, NULL);
 
-    ESP_LOGI(TAG, "Controller ready, broadcasting HELLO...");
+    ESP_LOGI(TAG, "Controller broadcasting HELLO, syncing time...");
+    request_time_from_backend();
+    ESP_LOGI(TAG, "Time synced — controller ready.");
+
+    // uart_listener_task reads UART RX for power-limit commands.
+    // It must start after request_time_from_backend() so they don't
+    // race on the same RX buffer and corrupt the time-sync response.
+    xTaskCreate(uart_listener_task, "uart_listen", 4096, NULL, 4, NULL);
 }
