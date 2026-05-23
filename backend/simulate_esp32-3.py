@@ -19,17 +19,17 @@ import requests
 
 BACKEND_URL = "http://localhost:8000/api/data"
 MAC_ADDRESS = "AA:BB:CC:DD:EE:03"
-INTERVAL    = 0.1   # seconds per frame
-NUM_SAMPLES = 10    # ADC samples per frame
+INTERVAL = 0.1  # seconds per frame
+NUM_SAMPLES = 10  # ADC samples per frame
 
 # ADC centres — voltage stays constant; current switches between phases
-VOLTAGE_CENTER  = 2800          # ≈ 41 V
-CURRENT_NORMAL  = 1800          # ≈ -3 A  → P ≈ -124 W  (below 350 W limit)
-CURRENT_VIOLATE = 2800          # ≈  9 A  → P ≈  377 W  (above 350 W limit)
+VOLTAGE_CENTER = 2800  # ≈ 41 V
+CURRENT_NORMAL = 1800  # ≈ -3 A  → P ≈ -124 W  (below 350 W limit)
+CURRENT_VIOLATE = 2800  # ≈  9 A  → P ≈  377 W  (above 350 W limit)
 
 # Phase durations in frames (1 frame = 0.1 s)
-FRAMES_NORMAL  = 50   # 5 s
-FRAMES_VIOLATE = 25   # 2.5 s  (backend escalates after 10 frames / 1 s)
+FRAMES_NORMAL = 50  # 5 s
+FRAMES_VIOLATE = 25  # 2.5 s  (backend escalates after 10 frames / 1 s)
 
 
 def adc_samples(center: int, spread: int = 50) -> list[int]:

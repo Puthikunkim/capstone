@@ -21,6 +21,7 @@ import json
 import logging
 import queue
 import threading
+import time
 from datetime import datetime, timezone
 
 import serial
@@ -37,48 +38,35 @@ logger = logging.getLogger(__name__)
 SAMPLES = 10
 MAX_FRAMES = 3
 
-
 # ---------------------------------------------------------------------------
-# Time sync
+# Outbound write queue
+# Callers outside the serial thread (e.g. REST handlers) put pre-encoded
+# newline-terminated ASCII messages here.  _serial_thread drains it after
+# each line it reads so messages are dispatched promptly.
 # ---------------------------------------------------------------------------
 
-def handle_power_limit_request(ser: serial.Serial, line: str) -> None:
-    """Handle a power_limit_request line from the controller.
+_write_queue: queue.Queue = queue.Queue()
 
-    The controller sends:
-        {"type":"power_limit_request","mac":"AA:BB:CC:DD:EE:FF"}
-    We respond with:
-        {"type":"power_limit_response","mac":"...","power_limit_watts":350.0}
+
+def enqueue_power_limit(mac: str, power_limit_watts: float) -> None:
+    """Push a power-limit command to the controller over UART.
+
+    Safe to call from any thread at any time; the message is delivered on
+    the next iteration of the serial read loop.  If the port is currently
+    disconnected the message is held in the queue and sent on reconnect.
     """
-    try:
-        req = json.loads(line)
-        mac = req.get("mac", "")
-    except json.JSONDecodeError:
-        logger.warning("power_limit_request: invalid JSON — %r", line[:120])
-        return
-
-    from sqlalchemy import select
-    from app.models.ecu import ECU
-    db = SessionLocal()
-    try:
-        ecu = db.scalar(select(ECU).where(ECU.mac_address == mac))
-        power_limit = float(ecu.power_limit_watts) if ecu else 350.0
-    finally:
-        db.close()
-
-    response = json.dumps({
-        "type": "power_limit_response",
+    msg = json.dumps({
+        "type": "power_limit",
         "mac": mac,
-        "power_limit_watts": power_limit,
+        "power_limit_watts": power_limit_watts,
     }) + "\n"
-    ser.write(response.encode("ascii"))
-    ser.flush()
-    logger.info("Power limit response sent: %.1f W for MAC %s", power_limit, mac)
+    _write_queue.put(msg.encode("ascii"))
+    logger.info("Queued power limit %.1f W for MAC %s", power_limit_watts, mac)
 
 
 def handle_time_sync(ser: serial.Serial) -> bool:
     logger.info("Waiting for TIME_REQUEST from controller...")
-    ser.timeout = 6
+    ser.timeout = 12
     line = b''
     while True:
         byte = ser.read(1)
@@ -227,40 +215,61 @@ async def process_frames(queue: asyncio.Queue) -> None:
 
 def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
     """Runs entirely in a background thread. Puts parsed frames onto out."""
-    logger.info("Opening %s at %d baud", port, baud)
-    try:
-        ser = serial.Serial(port, baud, timeout=1)
-    except serial.SerialException as exc:
-        logger.error("Failed to open port: %s", exc)
-        out.put(None)  # sentinel to signal failure
-        return
+    while True:
+        ser = None
+        while ser is None:
+            try:
+                logger.info("Opening %s at %d baud", port, baud)
+                ser = serial.Serial(port, baud, timeout=1)
+                ser.setRTS(False)
+                ser.setDTR(False)
+            except serial.SerialException:
+                logger.info("Port %s not available, retrying in 3s...", port)
+                time.sleep(3)
 
-    if not handle_time_sync(ser):
-        logger.warning("Time sync failed — ECU timestamps will be epoch")
+        try:
+            if not handle_time_sync(ser):
+                logger.warning("Time sync failed — ECU timestamps will be epoch")
+        except serial.SerialException as exc:
+            logger.error("Time sync error: %s — reconnecting", exc)
+            ser.close()
+            continue
 
-    logger.info("Listening for JSON packets...")
-    try:
-        while True:
-            line = _read_line(ser)
-            if not line:
-                continue
-            if not line.startswith('{'):
-                logger.debug("Ignoring non-JSON line: %r", line[:80])
-                continue
-            if '"power_limit_request"' in line:
-                handle_power_limit_request(ser, line)
-                continue
-            packet = parse_packet(line)
-            if packet is None:
-                continue
-            for frame in packet["frames"]:
-                frame["sender_id"] = packet["sender_id"]
-                out.put(frame)
-    except Exception as exc:
-        logger.error("Serial thread error: %s", exc)
-    finally:
-        ser.close()
-        out.put(None)  # sentinel
+        logger.info("Listening for JSON packets...")
+        try:
+            while True:
+                line = _read_line(ser)
+                if not line:
+                    continue
+                if not line.startswith('{'):
+                    if 'TIME_REQUEST' in line:
+                        now = datetime.now(timezone.utc)
+                        ts = now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond:06d}'
+                        response = json.dumps({"timestamp": ts}) + '\n'
+                        ser.write(response.encode('ascii'))
+                        ser.flush()
+                        logger.info("Time sync sent: %s", ts)
+                    else:
+                        logger.info("RX non-JSON: %r", line[:120])
+                    continue
+                packet = parse_packet(line)
+                if packet is None:
+                    continue
+                for frame in packet["frames"]:
+                    frame["sender_id"] = packet["sender_id"]
+                    out.put(frame)
+
+                while not _write_queue.empty():
+                    try:
+                        ser.write(_write_queue.get_nowait())
+                        ser.flush()
+                    except queue.Empty:
+                        break
+        except Exception as exc:
+            logger.error("Serial thread error: %s", exc)
+        finally:
+            ser.close()
+            logger.info("Port closed, reconnecting...")
 
 
 async def run(port: str, baud: int) -> None:

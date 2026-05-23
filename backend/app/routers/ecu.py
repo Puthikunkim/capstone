@@ -14,6 +14,7 @@ from app.database import get_db
 from app.schemas.ecu import ECUConfigure, ECUResponse
 from app.schemas.energy_frame import EnergyFrameResponse
 from app.services.storage import configure_ecu, get_ecu, get_frames, list_ecus
+from serial_reader import enqueue_power_limit
 
 router = APIRouter(prefix='/ecu', tags=["ecu"])
 
@@ -36,6 +37,7 @@ def configure_ecu_by_id(ecu_id: int, updates: ECUConfigure, db: Session = Depend
     ecu = configure_ecu(db, ecu_id, updates)
     if ecu is None:
         raise HTTPException(status_code=404, detail="ECU not found")
+    enqueue_power_limit(ecu.mac_address, ecu.power_limit_watts)
     return ecu
 
 
