@@ -67,7 +67,7 @@ export function AssignEcuModal({ team, onAssigned, onClose }) {
                   <div className="assign-ecu-info">
                     <span className={`ecu-dot ${ecu.is_connected ? "connected" : "disconnected"}`} />
                     <div>
-                      <span className="assign-ecu-serial">ECU #{ecu.serial_number}</span>
+                      <span className="assign-ecu-serial">ECU #{ecu.id}</span>
                       <span className="assign-ecu-status">
                         {ecu.is_connected ? "Connected" : "Not connected"}
                       </span>

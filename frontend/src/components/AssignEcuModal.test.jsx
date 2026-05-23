@@ -40,7 +40,7 @@ describe('AssignEcuModal — ECU list', () => {
     fetchAvailableEcus.mockResolvedValue([ECU]);
     render(<AssignEcuModal team={TEAM} onAssigned={() => {}} onClose={() => {}} />);
     await waitFor(() =>
-      expect(screen.getByText('ECU #1001')).toBeInTheDocument()
+      expect(screen.getByText('ECU #10')).toBeInTheDocument()
     );
     expect(screen.getByRole('button', { name: 'Assign' })).toBeInTheDocument();
   });
