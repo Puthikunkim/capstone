@@ -13,6 +13,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 
 #include <time.h>
 #include "esp_spiffs.h"
@@ -30,6 +31,11 @@ static const char *TAG = "SENDER";
 #define ACK_TIMEOUT_MS        200
 #define BUZZER_GPIO           GPIO_NUM_19
 #define BUZZER_BEEP_HALF_MS   125   // 4 Hz beep: 125 ms on, 125 ms off
+#define BUZZER_LEDC_TIMER     LEDC_TIMER_0
+#define BUZZER_LEDC_CHANNEL   LEDC_CHANNEL_0
+#define BUZZER_FREQ_HZ        2000
+#define BUZZER_DUTY_RES       LEDC_TIMER_10_BIT
+#define BUZZER_DUTY_50PCT     512   // 50% of 2^10
 
 // ====== Msg type ======
 #define MSG_HELLO             0x01
@@ -161,18 +167,35 @@ static SemaphoreHandle_t flash_mutex;
 
 
 /*---------------------------------------------------------------
-    Buzzer init — configure GPIO 19 as push-pull output, start low.
+    Buzzer — passive buzzer driven by LEDC PWM at 2 kHz.
+    buzzer_set(true)  → 50% duty → audible tone
+    buzzer_set(false) → 0% duty  → silent
 ---------------------------------------------------------------*/
 static void buzzer_init(void) {
-    gpio_config_t io_conf = {
-        .pin_bit_mask = 1ULL << BUZZER_GPIO,
-        .mode         = GPIO_MODE_OUTPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE,
+    ledc_timer_config_t timer = {
+        .speed_mode      = LEDC_LOW_SPEED_MODE,
+        .timer_num       = BUZZER_LEDC_TIMER,
+        .duty_resolution = BUZZER_DUTY_RES,
+        .freq_hz         = BUZZER_FREQ_HZ,
+        .clk_cfg         = LEDC_AUTO_CLK,
     };
-    gpio_config(&io_conf);
-    gpio_set_level(BUZZER_GPIO, 0);
+    ESP_ERROR_CHECK(ledc_timer_config(&timer));
+
+    ledc_channel_config_t channel = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel    = BUZZER_LEDC_CHANNEL,
+        .timer_sel  = BUZZER_LEDC_TIMER,
+        .gpio_num   = BUZZER_GPIO,
+        .duty       = 0,
+        .hpoint     = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel));
+}
+
+static void buzzer_set(bool on) {
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_CHANNEL,
+                  on ? BUZZER_DUTY_50PCT : 0);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, BUZZER_LEDC_CHANNEL);
 }
 
 /*---------------------------------------------------------------
@@ -570,20 +593,20 @@ void adc_task(void *arg) {
             } else {
                 if (over_power_flag) {
                     over_power_flag = false;
-                    gpio_set_level(BUZZER_GPIO, 0);
+                    buzzer_set(false);
                     ESP_LOGI(TAG,
                              "Power back to normal: %ld mW <= threshold %ld mW",
                              power_mw, power_threshold_mw);
                 }
             }
 
-            // Buzzer: beep at 4 Hz for the first second, then constant
+            // Buzzer: beep at 4 Hz for the first second, then continuous tone
             if (over_power_flag) {
                 int64_t breach_ms = now - over_power_start_ms;
                 if (breach_ms >= 1000) {
-                    gpio_set_level(BUZZER_GPIO, 1);
+                    buzzer_set(true);
                 } else {
-                    gpio_set_level(BUZZER_GPIO, (now / BUZZER_BEEP_HALF_MS) % 2);
+                    buzzer_set((now / BUZZER_BEEP_HALF_MS) % 2);
                 }
             }
 
