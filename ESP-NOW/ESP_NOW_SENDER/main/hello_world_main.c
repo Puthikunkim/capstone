@@ -12,6 +12,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+#include "driver/gpio.h"
 
 #include <time.h>
 #include "esp_spiffs.h"
@@ -27,6 +28,8 @@ static const char *TAG = "SENDER";
 #define MAX_FRAMES_PER_PKT    3
 #define SENDER_BUFFER_SIZE    3000
 #define ACK_TIMEOUT_MS        200
+#define BUZZER_GPIO           GPIO_NUM_19
+#define BUZZER_BEEP_HALF_MS   125   // 4 Hz beep: 125 ms on, 125 ms off
 
 // ====== Msg type ======
 #define MSG_HELLO             0x01
@@ -93,8 +96,9 @@ static uint16_t confirmed_floor  = 0;
 // delivers a real limit.  Replaced by MSG_POWER_LIMIT whenever the backend
 // pushes one via the controller.
 #define DEFAULT_POWER_LIMIT_MW  10000000L
-static volatile int32_t power_threshold_mw = DEFAULT_POWER_LIMIT_MW;
-static volatile bool    over_power_flag    = false;
+static volatile int32_t power_threshold_mw  = DEFAULT_POWER_LIMIT_MW;
+static volatile bool    over_power_flag      = false;
+static volatile int64_t over_power_start_ms  = 0;  // boot-time ms when breach began
 
 // ====== Status ======
 static uint8_t  my_mac[6];
@@ -157,14 +161,25 @@ static SemaphoreHandle_t flash_mutex;
 
 
 /*---------------------------------------------------------------
-    Power limit enforcement placeholder.
-    Called whenever a new power limit is received from the controller.
-    Replace this body with hardware-level enforcement (GPIO relay,
-    PWM cutback, etc.) when the hardware is ready.
+    Buzzer init — configure GPIO 19 as push-pull output, start low.
+---------------------------------------------------------------*/
+static void buzzer_init(void) {
+    gpio_config_t io_conf = {
+        .pin_bit_mask = 1ULL << BUZZER_GPIO,
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(BUZZER_GPIO, 0);
+}
+
+/*---------------------------------------------------------------
+    Called whenever a new power limit is pushed by the controller.
 ---------------------------------------------------------------*/
 static void on_power_limit_received(int32_t limit_mw) {
-    ESP_LOGI(TAG, "Power limit set to %ld mW — enforcement placeholder", limit_mw);
-    // TODO: implement hardware enforcement
+    ESP_LOGI(TAG, "Power limit updated to %ld mW", limit_mw);
 }
 
 /*---------------------------------------------------------------
@@ -579,7 +594,8 @@ void adc_task(void *arg) {
             int32_t power_mw = ((int32_t)mv_v * mv_c) / 1000;
             if (power_mw > power_threshold_mw) {
                 if (!over_power_flag) {
-                    over_power_flag = true;
+                    over_power_flag     = true;
+                    over_power_start_ms = now;
                     ESP_LOGE(TAG,
                              "OVER POWER: %ld mW > threshold %ld mW "
                              "(V=%d mV, I=%d mV)",
@@ -589,9 +605,20 @@ void adc_task(void *arg) {
             } else {
                 if (over_power_flag) {
                     over_power_flag = false;
+                    gpio_set_level(BUZZER_GPIO, 0);
                     ESP_LOGI(TAG,
                              "Power back to normal: %ld mW <= threshold %ld mW",
                              power_mw, power_threshold_mw);
+                }
+            }
+
+            // Buzzer: beep at 4 Hz for the first second, then constant
+            if (over_power_flag) {
+                int64_t breach_ms = now - over_power_start_ms;
+                if (breach_ms >= 1000) {
+                    gpio_set_level(BUZZER_GPIO, 1);
+                } else {
+                    gpio_set_level(BUZZER_GPIO, (now / BUZZER_BEEP_HALF_MS) % 2);
                 }
             }
 
@@ -745,9 +772,10 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
 
-    wifi_init();   // initialises NVS via nvs_flash_init()
+    wifi_init();    // initialises NVS via nvs_flash_init()
     adc_init();
-    flash_init();  // mount SPIFFS and restore buffered frames from previous session
+    buzzer_init();
+    flash_init();   // mount SPIFFS and restore buffered frames from previous session
 
     if (esp_now_init() != ESP_OK) {
         ESP_LOGE(TAG, "ESP-NOW init failed");
