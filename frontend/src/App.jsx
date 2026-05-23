@@ -5,19 +5,30 @@ import { Navbar } from "./components/Navbar";
 import { Sidebar } from "./components/Sidebar";
 import { Dashboard } from "./pages/Dashboard";
 import { CompetitionsPage } from "./pages/CompetitionsPage";
-import { CreateTeamModal } from "./components/CreateTeamModal";
 import { AssignEcuModal } from "./components/AssignEcuModal";
-import { fetchEcus, fetchCompetitionTeams, unassignEcuFromTeam, fetchAlerts, fetchOpenViolations } from "./api/http";
+import {
+  fetchEcus,
+  fetchCompetitionTeams,
+  unassignEcuFromTeam,
+  fetchAlerts,
+  fetchOpenViolations,
+  fetchEventParticipants,
+  updateEventParticipant,
+} from "./api/http";
+import { AddTeamToCompetitionModal } from "./components/AddTeamToCompetitionModal";
+import { CompetitionTeamsPanel } from "./components/CompetitionTeamsPanel";
 import "./App.css";
 
 export default function App() {
   const [selectedCompetition, setSelectedCompetition] = useState(null);
+  const [selectedEvent, setSelectedEvent] = useState(null);
   const [ecuList, setEcuList] = useState([]);
   const [competitionTeams, setCompetitionTeams] = useState([]);
+  const [eventParticipants, setEventParticipants] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(null);
   const [selectedEcuId, setSelectedEcuId] = useState(null);
   const [backendError, setBackendError] = useState(false);
-  const [showCreateTeam, setShowCreateTeam] = useState(false);
+  const [showAddTeam, setShowAddTeam] = useState(false);
   const [showAssignEcu, setShowAssignEcu] = useState(false);
   const [violatingEcuIds, setViolatingEcuIds] = useState(new Set());
   const alertBaselineRef = useRef(null);
@@ -32,26 +43,37 @@ export default function App() {
     return () => clearInterval(id);
   }, [backendError]);
 
+  // Reset when competition changes
   useEffect(() => {
     if (!selectedCompetition) {
       setCompetitionTeams([]);
+      setSelectedEvent(null);
+      setEventParticipants([]);
       setSelectedTeam(null);
       setSelectedEcuId(null);
       return;
     }
+    setSelectedEvent(null);
+    setEventParticipants([]);
+    setSelectedTeam(null);
+    setSelectedEcuId(null);
     fetchCompetitionTeams(selectedCompetition.id)
-      .then((teams) => {
-        setCompetitionTeams(teams);
-        const teamIds = new Set(teams.map((t) => t.id));
-        const firstEcu = ecuList.find((e) => e.team_id && teamIds.has(e.team_id));
-        if (firstEcu) {
-          const team = teams.find((t) => t.id === firstEcu.team_id);
-          setSelectedTeam(team ?? null);
-          setSelectedEcuId(firstEcu.id);
-        }
-      })
+      .then(setCompetitionTeams)
       .catch(() => setCompetitionTeams([]));
   }, [selectedCompetition]);
+
+  // Fetch participants when event changes
+  useEffect(() => {
+    if (!selectedEvent) {
+      setEventParticipants([]);
+      setSelectedTeam(null);
+      setSelectedEcuId(null);
+      return;
+    }
+    fetchEventParticipants(selectedEvent.id)
+      .then(setEventParticipants)
+      .catch(() => setEventParticipants([]));
+  }, [selectedEvent]);
 
   // Reset alert baseline when competition changes
   useEffect(() => {
@@ -75,7 +97,6 @@ export default function App() {
         const relevant = alerts.filter((a) => ecuIds.has(a.ecu_id));
         if (relevant.length === 0) return;
 
-        // Advance baseline so we don't re-toast the same alerts
         const latest = relevant.reduce((max, a) =>
           new Date(a.timestamp) > new Date(max.timestamp) ? a : max
         );
@@ -99,7 +120,7 @@ export default function App() {
     return () => clearInterval(id);
   }, [selectedCompetition, competitionTeams, ecuList]);
 
-  // Poll for active (open) violations to drive the red dot on team cards
+  // Poll for active violations to drive the red dot on team cards
   useEffect(() => {
     if (!selectedCompetition) {
       setViolatingEcuIds(new Set());
@@ -140,18 +161,28 @@ export default function App() {
     fetchEcus().then(setEcuList).catch(() => {});
   }
 
+  function refreshEventParticipants() {
+    if (!selectedEvent) return;
+    fetchEventParticipants(selectedEvent.id).then(setEventParticipants).catch(() => {});
+  }
+
+  function handleSelectEvent(event) {
+    setSelectedEvent(event);
+    setSelectedTeam(null);
+    setSelectedEcuId(null);
+    if (!event) setEventParticipants([]);
+  }
+
   function handleSelectTeam(team) {
     setSelectedTeam(team);
     const ecu = ecuList.find((e) => e.team_id === team.id);
     setSelectedEcuId(ecu?.id ?? null);
   }
 
-  function handleTeamCreated(team, assignedEcuId) {
+  function handleTeamAdded(team) {
     refreshCompetitionData();
-    if (assignedEcuId) {
-      setSelectedTeam(team);
-      setSelectedEcuId(assignedEcuId);
-    }
+    refreshEventParticipants();
+    setSelectedTeam(team);
   }
 
   function handleEcuAssigned(ecuId) {
@@ -163,13 +194,22 @@ export default function App() {
     try {
       await unassignEcuFromTeam(team.id, ecu.id);
       refreshCompetitionData();
-      // if the unassigned ECU was selected, clear it
       if (selectedEcuId === ecu.id) {
         setSelectedEcuId(null);
         setSelectedTeam(team);
       }
     } catch {
-      // silently ignore — could add a toast here later
+      // silently ignore
+    }
+  }
+
+  async function handleSaveParticipant(data) {
+    if (!participant) return;
+    try {
+      const updated = await updateEventParticipant(participant.id, data);
+      setEventParticipants((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    } catch {
+      // silently ignore
     }
   }
 
@@ -190,29 +230,44 @@ export default function App() {
 
   const hasEcu = selectedTeam && competitionEcus.some((e) => e.team_id === selectedTeam.id);
 
+  const eventTeamIds = new Set(eventParticipants.map((p) => p.team_id));
+  const eventTeams = competitionTeams.filter((t) => eventTeamIds.has(t.id));
+  const participant = selectedTeam
+    ? (eventParticipants.find((p) => p.team_id === selectedTeam.id) ?? null)
+    : null;
+
   return (
     <div className="app-shell">
       <Navbar
         connectedCount={connectedCount}
         totalCount={competitionEcus.length}
         competition={selectedCompetition}
+        selectedEvent={selectedEvent}
         onBack={() => setSelectedCompetition(null)}
       />
       <div className="app-body">
         {!backendError && (
           <Sidebar
-            teams={competitionTeams}
+            events={selectedCompetition?.events ?? []}
+            selectedEvent={selectedEvent}
+            onSelectEvent={handleSelectEvent}
+            teams={eventTeams}
             ecuList={competitionEcus}
             selectedTeamId={selectedTeam?.id}
             selectedEcuId={selectedEcuId}
             violatingEcuIds={violatingEcuIds}
             onSelectTeam={handleSelectTeam}
             onUnassignEcu={handleUnassignEcu}
-            onCreateTeam={() => setShowCreateTeam(true)}
           />
         )}
         <main className="main-content">
-          {selectedTeam && !hasEcu ? (
+          {!selectedEvent ? (
+            <CompetitionTeamsPanel
+              teams={competitionTeams}
+              ecuList={competitionEcus}
+              onAddTeam={() => setShowAddTeam(true)}
+            />
+          ) : selectedTeam && !hasEcu ? (
             <div className="dashboard">
               <div className="dashboard-empty">
                 <svg className="empty-icon" viewBox="0 0 48 48" fill="none">
@@ -229,24 +284,27 @@ export default function App() {
           ) : (
             <Dashboard
               selectedEcuId={selectedEcuId}
+              teamId={resolvedTeam?.id ?? null}
               backendError={backendError}
               teamName={resolvedTeam?.name ?? null}
-              onCreateTeam={() => setShowCreateTeam(true)}
               onUnassign={
                 resolvedTeam && selectedEcu
                   ? () => handleUnassignEcu(resolvedTeam, selectedEcu)
                   : undefined
               }
+              participant={participant}
+              onSaveParticipant={handleSaveParticipant}
             />
           )}
         </main>
       </div>
 
-      {showCreateTeam && (
-        <CreateTeamModal
-          competitionId={selectedCompetition.id}
-          onCreated={handleTeamCreated}
-          onClose={() => setShowCreateTeam(false)}
+      {showAddTeam && (
+        <AddTeamToCompetitionModal
+          competition={selectedCompetition}
+          competitionTeams={competitionTeams}
+          onTeamAdded={handleTeamAdded}
+          onClose={() => setShowAddTeam(false)}
         />
       )}
 

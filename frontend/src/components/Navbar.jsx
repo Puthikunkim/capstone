@@ -7,8 +7,9 @@ const EVENT_LABELS = {
   endurance_efficiency: "Endurance & Efficiency",
 };
 
-export function Navbar({ connectedCount, totalCount, competition, onBack }) {
+export function Navbar({ connectedCount, totalCount, competition, selectedEvent, onBack }) {
   const healthPct = totalCount > 0 ? Math.round((connectedCount / totalCount) * 100) : 100;
+  const badgeEvents = selectedEvent ? [selectedEvent] : (competition?.events ?? []);
 
   return (
     <nav className="navbar">
@@ -24,9 +25,9 @@ export function Navbar({ connectedCount, totalCount, competition, onBack }) {
         {competition && (
           <>
             <span className="navbar-competition-name">{competition.name}</span>
-            {competition.events?.length > 0 && (
+            {badgeEvents.length > 0 && (
               <div className="navbar-event-badges">
-                {competition.events.map((ev) => (
+                {badgeEvents.map((ev) => (
                   <span key={ev.id} className="navbar-event-badge">
                     {EVENT_LABELS[ev.event_type] ?? ev.event_type}
                   </span>
@@ -74,6 +75,7 @@ Navbar.propTypes = {
   connectedCount: PropTypes.number,
   totalCount: PropTypes.number,
   competition: PropTypes.object,
+  selectedEvent: PropTypes.object,
   onBack: PropTypes.func,
 };
 

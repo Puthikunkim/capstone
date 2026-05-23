@@ -16,8 +16,21 @@ export const fetchEcus = () => request("/ecu");
 
 export const fetchEcu = (ecuId) => request(`/ecu/${ecuId}`);
 
-export const fetchEcuHistory = (ecuId, limit = 100) =>
-  request(`/ecu/${ecuId}/history?limit=${limit}`);
+export const fetchEcuHistory = (ecuId, { limit, teamId } = {}) => {
+  const p = new URLSearchParams();
+  if (limit != null) p.set("limit", limit);
+  if (teamId != null) p.set("team_id", teamId);
+  const qs = p.toString();
+  return request(`/ecu/${ecuId}/history${qs ? `?${qs}` : ""}`);
+};
+
+export const fetchTeamFrames = (teamId, { eventId, limit } = {}) => {
+  const p = new URLSearchParams();
+  if (eventId != null) p.set("event_id", eventId);
+  if (limit != null) p.set("limit", limit);
+  const qs = p.toString();
+  return request(`/teams/${teamId}/frames${qs ? `?${qs}` : ""}`);
+};
 
 export const configureEcu = (ecuId, config) =>
   request(`/ecu/${ecuId}/configure`, {
@@ -44,6 +57,19 @@ export const assignEcuToTeam = (teamId, ecuId) =>
   request(`/teams/${teamId}/assign/${ecuId}`, { method: "POST" });
 export const unassignEcuFromTeam = (teamId, ecuId) =>
   request(`/teams/${teamId}/unassign/${ecuId}`, { method: "POST" });
+
+export const addTeamToCompetition = (competitionId, teamId) =>
+  request(`/competitions/${competitionId}/teams/${teamId}`, { method: "POST" });
+
+// ── Event Participants ────────────────────────────────────────────────
+export const fetchEventParticipants = (eventId) =>
+  request(`/event-participants/?event_id=${eventId}`);
+
+export const updateEventParticipant = (participantId, payload) =>
+  request(`/event-participants/${participantId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 
 // ── Violations / Alerts ───────────────────────────────────────────────
 export const fetchViolations = (ecuId, limit = 50) =>

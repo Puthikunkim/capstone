@@ -1,6 +1,12 @@
 import { useState } from "react";
 import PropTypes from "prop-types";
 
+const EVENT_LABELS = {
+  drag_race: "Drag Race",
+  gymkhana: "Gymkhana",
+  endurance_efficiency: "Endurance & Efficiency",
+};
+
 function ecuStatus(ecu) {
   if (ecu.is_connected) return "connected";
   if (ecu.last_seen) return "lost";
@@ -22,7 +28,6 @@ function FlashIndicator({ flashUsage }) {
 }
 FlashIndicator.propTypes = { flashUsage: PropTypes.number };
 
-// Flat team card — one ECU per team
 function TeamCard({ team, ecu, isActive, isViolating, onSelect }) {
   const status = ecu ? ecuStatus(ecu) : "disconnected";
   const dotClass = isViolating ? "violation" : status;
@@ -58,32 +63,71 @@ TeamCard.propTypes = {
   onSelect: PropTypes.func.isRequired,
 };
 
-export function Sidebar({ teams, ecuList, selectedTeamId, selectedEcuId, violatingEcuIds, onSelectTeam, onUnassignEcu, onCreateTeam }) {
+export function Sidebar({
+  events,
+  selectedEvent,
+  onSelectEvent,
+  teams,
+  ecuList,
+  selectedTeamId,
+  selectedEcuId,
+  violatingEcuIds,
+  onSelectTeam,
+  onUnassignEcu,
+}) {
   const [query, setQuery] = useState("");
 
-  const isGrouped = teams != null;
+  // ── Events list view ──────────────────────────────────────────────
+  if (!selectedEvent) {
+    return (
+      <aside className="sidebar">
+        <div className="sidebar-section-label">Events</div>
+        <div className="sidebar-ecu-list">
+          {(events ?? []).length === 0 ? (
+            <div className="sidebar-empty">No events in this competition</div>
+          ) : (
+            (events ?? []).map((ev) => (
+              <div
+                key={ev.id}
+                className="sidebar-event-item"
+                onClick={() => onSelectEvent(ev)}
+              >
+                <svg viewBox="0 0 16 16" fill="none" width="14" height="14" className="sidebar-event-icon">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
+                  <path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+                <span className="sidebar-event-label">
+                  {EVENT_LABELS[ev.event_type] ?? ev.event_type}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </aside>
+    );
+  }
 
+  // ── Teams list view (event selected) ─────────────────────────────
   const q = query.toLowerCase();
-
-  const filteredTeams = isGrouped
-    ? teams.filter((team) => {
-        if (!q) return true;
-        if (team.name.toLowerCase().includes(q)) return true;
-        const ecu = ecuList.find((e) => e.team_id === team.id);
-        return ecu ? String(ecu.serial_number).includes(q) : false;
-      })
-    : [];
-
-  const flatFiltered = !isGrouped
-    ? ecuList.filter((ecu) =>
-        `team ${ecu.team_number}`.toLowerCase().includes(q) ||
-        String(ecu.serial_number ?? "").includes(q)
-      )
-    : [];
+  const filteredTeams = (teams ?? []).filter((team) => {
+    if (!q) return true;
+    if (team.name.toLowerCase().includes(q)) return true;
+    const ecu = ecuList.find((e) => e.team_id === team.id);
+    return ecu ? String(ecu.serial_number).includes(q) : false;
+  });
 
   return (
     <aside className="sidebar">
       <div className="sidebar-search">
+        <button className="sidebar-back-btn" onClick={() => onSelectEvent(null)}>
+          <svg viewBox="0 0 16 16" fill="none" width="12" height="12">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {EVENT_LABELS[selectedEvent.event_type] ?? selectedEvent.event_type}
+        </button>
+      </div>
+
+      <div className="sidebar-search" style={{ paddingTop: 0 }}>
         <div className="search-input-wrap">
           <svg viewBox="0 0 16 16" fill="none" width="14" height="14">
             <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.5" />
@@ -91,89 +135,47 @@ export function Sidebar({ teams, ecuList, selectedTeamId, selectedEcuId, violati
           </svg>
           <input
             type="text"
-            placeholder={isGrouped ? "Find team or ECU…" : "Find ECU or Team…"}
+            placeholder="Find team or ECU…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
       </div>
 
-      <div className="sidebar-section-label">
-        Teams
-        {isGrouped && onCreateTeam && (
-          <button className="sidebar-add-btn" onClick={onCreateTeam} title="Add team">
-            <svg viewBox="0 0 14 14" fill="none" width="12" height="12">
-              <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </button>
-        )}
-      </div>
+      <div className="sidebar-section-label">Teams</div>
 
       <div className="sidebar-ecu-list">
-        {isGrouped ? (
-          <>
-            {teams.length === 0 && (
-              <div className="sidebar-empty">No teams in this competition</div>
-            )}
-            {teams.length > 0 && filteredTeams.length === 0 && (
-              <div className="sidebar-empty">No results for &ldquo;{query}&rdquo;</div>
-            )}
-            {filteredTeams.map((team) => {
-              const ecu = ecuList.find((e) => e.team_id === team.id);
-              const isActive = ecu ? selectedEcuId === ecu.id : selectedTeamId === team.id;
-              const isViolating = ecu ? (violatingEcuIds ?? new Set()).has(ecu.id) : false;
-              return (
-                <TeamCard
-                  key={team.id}
-                  team={team}
-                  ecu={ecu}
-                  isActive={isActive}
-                  isViolating={isViolating}
-                  onSelect={() => onSelectTeam(team)}
-                  onUnassign={() => onUnassignEcu && onUnassignEcu(team, ecu)}
-                />
-              );
-            })}
-          </>
-        ) : (
-          <>
-            {ecuList.length === 0 && (
-              <div className="sidebar-empty">No ECUs registered</div>
-            )}
-            {ecuList.length > 0 && flatFiltered.length === 0 && (
-              <div className="sidebar-empty">No results for &ldquo;{query}&rdquo;</div>
-            )}
-            {flatFiltered.map((ecu) => {
-              const status = ecuStatus(ecu);
-              const isActive = selectedEcuId === ecu.id;
-              return (
-                <div
-                  key={ecu.id}
-                  className={`sidebar-ecu-item ${isActive ? "active" : ""} status-${status}`}
-
-                >
-                  <div className="ecu-item-main">
-                    <div className="ecu-item-info">
-                      <span className="ecu-item-name">Team {ecu.team_number}</span>
-                      <span className="ecu-item-class">{ecu.vehicle_class} Class</span>
-                      {status === "lost" && <span className="ecu-item-sublabel">Connection Lost</span>}
-                    </div>
-                    <div className="ecu-item-right">
-                      <div className={`ecu-dot ${status}`} />
-                      <FlashIndicator flashUsage={ecu.flash_usage} />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </>
+        {(teams ?? []).length === 0 && (
+          <div className="sidebar-empty">No teams in this competition</div>
         )}
+        {(teams ?? []).length > 0 && filteredTeams.length === 0 && (
+          <div className="sidebar-empty">No results for &ldquo;{query}&rdquo;</div>
+        )}
+        {filteredTeams.map((team) => {
+          const ecu = ecuList.find((e) => e.team_id === team.id);
+          const isActive = ecu ? selectedEcuId === ecu.id : selectedTeamId === team.id;
+          const isViolating = ecu ? (violatingEcuIds ?? new Set()).has(ecu.id) : false;
+          return (
+            <TeamCard
+              key={team.id}
+              team={team}
+              ecu={ecu}
+              isActive={isActive}
+              isViolating={isViolating}
+              onSelect={() => onSelectTeam(team)}
+              onUnassign={() => onUnassignEcu && onUnassignEcu(team, ecu)}
+            />
+          );
+        })}
       </div>
     </aside>
   );
 }
 
 Sidebar.propTypes = {
+  events: PropTypes.array,
+  selectedEvent: PropTypes.object,
+  onSelectEvent: PropTypes.func.isRequired,
   teams: PropTypes.array,
   ecuList: PropTypes.array.isRequired,
   selectedTeamId: PropTypes.number,
@@ -181,5 +183,4 @@ Sidebar.propTypes = {
   violatingEcuIds: PropTypes.instanceOf(Set),
   onSelectTeam: PropTypes.func.isRequired,
   onUnassignEcu: PropTypes.func,
-  onCreateTeam: PropTypes.func,
 };

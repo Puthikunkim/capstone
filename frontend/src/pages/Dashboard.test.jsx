@@ -5,6 +5,7 @@ import { Dashboard } from './Dashboard';
 vi.mock('../api/http', () => ({
   fetchEcu: vi.fn(),
   fetchEcuHistory: vi.fn(),
+  fetchTeamFrames: vi.fn(),
   fetchViolations: vi.fn(),
   configureEcu: vi.fn(),
   uploadFirmware: vi.fn(),
@@ -12,7 +13,7 @@ vi.mock('../api/http', () => ({
 }));
 
 vi.mock('../hooks/useWebSocket', () => ({
-  useWebSocket: vi.fn(),
+  useTeamWebSocket: vi.fn(),
 }));
 
 vi.mock('../components/TelemetryChart', () => ({
@@ -20,18 +21,19 @@ vi.mock('../components/TelemetryChart', () => ({
   HistoryChart: () => <div data-testid="history-chart" />,
 }));
 
-import { fetchEcu, fetchEcuHistory, fetchViolations, fetchFirmwareStatus } from '../api/http';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { fetchEcu, fetchEcuHistory, fetchTeamFrames, fetchViolations, fetchFirmwareStatus } from '../api/http';
+import { useTeamWebSocket } from '../hooks/useWebSocket';
 
 const ECU = { id: 1, serial_number: 1001, team_number: 1, vehicle_class: 'Standard', vehicle_type: 'kart' };
 const HISTORY = [
-  { timestamp: '2024-01-01T12:00:00Z', avg_voltage: 41.0, avg_current: -3.0, energy: -3.0 },
+  { timestamp: '2024-01-01T12:00:00Z', voltage_samples: [41], current_samples: [-3], energy: -3 },
 ];
 
 beforeEach(() => {
-  useWebSocket.mockReturnValue({ isConnected: false, liveData: null });
+  useTeamWebSocket.mockReturnValue({ isConnected: false, liveData: null });
   fetchEcu.mockResolvedValue(ECU);
   fetchEcuHistory.mockResolvedValue([]);
+  fetchTeamFrames.mockResolvedValue([]);
   fetchViolations.mockResolvedValue([]);
   fetchFirmwareStatus.mockResolvedValue(null);
 });
@@ -62,10 +64,10 @@ describe('Dashboard — empty state', () => {
 
 describe('Dashboard — ECU selected', () => {
   test('fetches ECU, history, and violations when an ECU is selected', async () => {
-    render(<Dashboard selectedEcuId={1} />);
+    render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() => {
       expect(fetchEcu).toHaveBeenCalledWith(1);
-      expect(fetchEcuHistory).toHaveBeenCalledWith(1, 10000);
+      expect(fetchEcuHistory).toHaveBeenCalledWith(1, { limit: 100, teamId: 1 });
       expect(fetchViolations).toHaveBeenCalledWith(1);
     });
   });
@@ -87,7 +89,7 @@ describe('Dashboard — connection status', () => {
   });
 
   test('connection status is active when WebSocket is connected', async () => {
-    useWebSocket.mockReturnValue({ isConnected: true, liveData: null });
+    useTeamWebSocket.mockReturnValue({ isConnected: true, liveData: null });
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() =>
       expect(screen.getByTestId('connection-status')).toHaveClass('active')
@@ -105,7 +107,7 @@ describe('Dashboard — chart', () => {
 
   test('shows TelemetryChart when history data is available', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
-    render(<Dashboard selectedEcuId={1} />);
+    render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() =>
       expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2)
     );
@@ -142,7 +144,7 @@ describe('Dashboard — Live/History toggle', () => {
 
   test('clicking History on voltage chart shows HistoryChart and removes one TelemetryChart', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
-    render(<Dashboard selectedEcuId={1} />);
+    render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
@@ -153,7 +155,7 @@ describe('Dashboard — Live/History toggle', () => {
 
   test('clicking History on current chart shows HistoryChart and removes one TelemetryChart', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
-    render(<Dashboard selectedEcuId={1} />);
+    render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[1]);
@@ -179,7 +181,7 @@ describe('Dashboard — Live/History toggle', () => {
 
   test('clicking Live after History switches back to TelemetryChart', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
-    render(<Dashboard selectedEcuId={1} />);
+    render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
@@ -192,13 +194,13 @@ describe('Dashboard — Live/History toggle', () => {
 
   test('toggles reset to Live when a different ECU is selected', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
-    const { rerender } = render(<Dashboard selectedEcuId={1} />);
+    const { rerender } = render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
     expect(screen.getByTestId('history-chart')).toBeInTheDocument();
 
-    rerender(<Dashboard selectedEcuId={2} />);
+    rerender(<Dashboard selectedEcuId={2} teamId={1} />);
     await waitFor(() =>
       expect(screen.queryByTestId('history-chart')).not.toBeInTheDocument()
     );

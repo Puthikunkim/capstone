@@ -19,6 +19,14 @@ class ECUAssignmentConflictError(ValueError):
     pass
 
 
+class TeamAlreadyInCompetitionError(ValueError):
+    pass
+
+
+class TeamInDifferentCompetitionError(ValueError):
+    pass
+
+
 def create_team(db: Session, payload: TeamCreate) -> Team:
     normalized_name = payload.name.strip()
 
@@ -53,6 +61,25 @@ def _enroll_team_in_competition_events(db: Session, team: Team, competition_id: 
                 db.add(EventParticipant(team_id=team.id, event_id=event.id))
     except IntegrityError:
         pass  # already enrolled — outer transaction (and team) stays intact
+
+
+def add_team_to_competition(db: Session, team: Team, competition_id: int) -> Team:
+    if team.competition_id == competition_id:
+        raise TeamAlreadyInCompetitionError(f"Team '{team.name}' is already in this competition")
+    if team.competition_id is not None:
+        raise TeamInDifferentCompetitionError(
+            f"Team '{team.name}' is already assigned to a different competition"
+        )
+    team.competition_id = competition_id
+    try:
+        db.flush()
+        _enroll_team_in_competition_events(db, team, competition_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(team)
+    return team
 
 
 def list_teams(db: Session) -> list[Team]:

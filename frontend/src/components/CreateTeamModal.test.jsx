@@ -56,7 +56,6 @@ describe('CreateTeamModal — submission', () => {
     await waitFor(() =>
       expect(createTeam).toHaveBeenCalledWith(expect.objectContaining({
         name: 'Team Gamma',
-        competition_id: 5,
       }))
     );
   });
