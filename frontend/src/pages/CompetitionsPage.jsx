@@ -367,21 +367,18 @@ export function CompetitionsPage({ onSelectCompetition }) {
     <div className="competitions-page">
       <nav className="competitions-topbar">
         <img src={logo} alt="EVolocity" className="navbar-logo-img" />
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn-secondary" onClick={() => setShowNewTeam(true)}>
-            + New Team
-          </button>
-          <button className="btn-primary" onClick={openNewCompModal}>
-            + New Competition
-          </button>
-        </div>
       </nav>
 
       <div className="competitions-content">
         {/* ── Competitions section ── */}
         <div className="competitions-heading">
-          <h1>Competitions</h1>
-          <p>Select a competition to open its live dashboard</p>
+          <div>
+            <h1>Competitions</h1>
+            <p>Select a competition to open its live dashboard</p>
+          </div>
+          <button className="btn-primary" onClick={openNewCompModal}>
+            + New Competition
+          </button>
         </div>
 
         {loading && <div className="loading-state">Loading…</div>}
@@ -407,9 +404,6 @@ export function CompetitionsPage({ onSelectCompetition }) {
             </svg>
             <p>No competitions yet</p>
             <span>Create your first competition to get started</span>
-            <button className="btn-primary" onClick={openNewCompModal}>
-              + New Competition
-            </button>
           </div>
         )}
 
@@ -444,9 +438,6 @@ export function CompetitionsPage({ onSelectCompetition }) {
               <div className="teams-empty">
                 <p>No teams yet</p>
                 <span>Create a team to get started</span>
-                <button className="btn-primary" style={{ marginTop: 8 }} onClick={() => setShowNewTeam(true)}>
-                  + New Team
-                </button>
               </div>
             ) : (
               <div className="teams-grid">

@@ -648,6 +648,10 @@ body {
 }
 
 .competitions-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 32px;
 }
 .competitions-heading h1 {
