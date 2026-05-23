@@ -25,7 +25,7 @@ static const char *TAG = "CONTROLLER";
 #define DISCONNECT_TIMEOUT_US 300000000LL
 #define MAX_NODES             20
 #define SAMPLES_PER_FRAME     10
-#define MAX_FRAMES_PER_PKT    31
+#define MAX_FRAMES_PER_PKT    3
 
 #define TIME_REQUEST_STR      "TIME_REQUEST\n"
 #define TIME_RESPONSE_BUF_LEN 128
@@ -405,6 +405,11 @@ static void on_data_recv(const esp_now_recv_info_t *info,
         add_peer(info->src_addr);
         node_state_t *node = register_node(info->src_addr);
         if (!node) return;
+
+        if (!time_synced) {
+            ESP_LOGW(TAG, "REGISTER received but time not synced yet, ignoring");
+            return;
+        }
 
         welcome_packet_t welcome = {
             .msg_type = MSG_WELCOME,

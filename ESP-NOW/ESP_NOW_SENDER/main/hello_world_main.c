@@ -24,7 +24,7 @@ static const char *TAG = "SENDER";
 #define ADC_CURRENT_CHANNEL   ADC_CHANNEL_6
 #define ADC_VOLTAGE_CHANNEL   ADC_CHANNEL_7
 #define SAMPLES_PER_FRAME     10
-#define MAX_FRAMES_PER_PKT    31
+#define MAX_FRAMES_PER_PKT    3
 #define SENDER_BUFFER_SIZE    3000
 #define ACK_TIMEOUT_MS        200
 
@@ -535,7 +535,12 @@ static void adc_init(void) {
 }
 
 static void wifi_init(void) {
-    nvs_flash_init();
+    esp_err_t nvs_ret = nvs_flash_init();
+    if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS corrupted, erasing and reinitialising");
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
     esp_netif_init();
     esp_event_loop_create_default();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
