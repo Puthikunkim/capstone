@@ -448,6 +448,22 @@ static void on_data_recv(const esp_now_recv_info_t *info,
                  info->src_addr[3], info->src_addr[4], info->src_addr[5],
                  pkt->frame_count, node->confirmed_floor);
 
+        for (int i = 0; i < pkt->frame_count; i++) {
+            const adc_frame_t *fr = &pkt->frames[i];
+            ESP_LOGI(TAG, "  Frame %d V: %d %d %d %d %d %d %d %d %d %d",
+                     fr->counter,
+                     fr->voltage_mv[0], fr->voltage_mv[1], fr->voltage_mv[2],
+                     fr->voltage_mv[3], fr->voltage_mv[4], fr->voltage_mv[5],
+                     fr->voltage_mv[6], fr->voltage_mv[7], fr->voltage_mv[8],
+                     fr->voltage_mv[9]);
+            ESP_LOGI(TAG, "  Frame %d I: %d %d %d %d %d %d %d %d %d %d",
+                     fr->counter,
+                     fr->current_mv[0], fr->current_mv[1], fr->current_mv[2],
+                     fr->current_mv[3], fr->current_mv[4], fr->current_mv[5],
+                     fr->current_mv[6], fr->current_mv[7], fr->current_mv[8],
+                     fr->current_mv[9]);
+        }
+
         uart_send_json(pkt, info->src_addr, rx_time_ms);
 
         ack_packet_t ack = {

@@ -599,8 +599,8 @@ void adc_task(void *arg) {
             }
 
             /*if (is_c_low) {
-                mv_c = 100;
-            */}
+                mv_c = 100;}
+            */
 
             ESP_ERROR_CHECK(adc_oneshot_read(
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
