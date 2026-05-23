@@ -24,7 +24,7 @@ vi.mock('../components/TelemetryChart', () => ({
 import { fetchEcu, fetchEcuHistory, fetchTeamFrames, fetchViolations, fetchFirmwareStatus } from '../api/http';
 import { useTeamWebSocket } from '../hooks/useWebSocket';
 
-const ECU = { id: 1, serial_number: 1001, team_number: 1, vehicle_class: 'Standard', vehicle_type: 'kart' };
+const ECU = { id: 1, mac_address: 'AA:BB:CC:DD:EE:01', team_number: 1, vehicle_class: 'Standard', vehicle_type: 'kart', is_connected: false };
 const HISTORY = [
   { timestamp: '2024-01-01T12:00:00Z', voltage_samples: [41], current_samples: [-3], energy: -3 },
 ];
@@ -88,8 +88,8 @@ describe('Dashboard — connection status', () => {
     );
   });
 
-  test('connection status is active when WebSocket is connected', async () => {
-    useTeamWebSocket.mockReturnValue({ isConnected: true, liveData: null });
+  test('connection status is active when ECU is connected', async () => {
+    fetchEcu.mockResolvedValue({ ...ECU, is_connected: true });
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() =>
       expect(screen.getByTestId('connection-status')).toHaveClass('active')

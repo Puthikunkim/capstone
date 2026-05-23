@@ -66,8 +66,7 @@ export function LeaderboardPage({ eventId, eventType }) {
     load();
     intervalRef.current = setInterval(load, 5000);
     return () => clearInterval(intervalRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId]);
+  }, [eventId]); // load is intentionally omitted — it's a stable inner fn recreated each render
 
   const scored  = data?.entries.filter((e) => e.status === "scored") ?? [];
   const pending = data?.entries.filter((e) => e.status !== "scored") ?? [];

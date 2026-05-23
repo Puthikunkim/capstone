@@ -10,8 +10,8 @@ const TEAMS = [
 ];
 
 const ECUS = [
-  { id: 10, serial_number: '1001', team_id: 1, team_number: 1, is_connected: true, last_seen: '2024-01-01T12:00:00Z', flash_usage: null, vehicle_class: 'Standard' },
-  { id: 11, serial_number: '1002', team_id: null, team_number: 2, is_connected: false, last_seen: null, flash_usage: null, vehicle_class: 'Standard' },
+  { id: 10, mac_address: 'AA:BB:CC:DD:EE:01', team_id: 1, team_number: 1, is_connected: true, last_seen: '2024-01-01T12:00:00Z', flash_usage: null, vehicle_class: 'Standard' },
+  { id: 11, mac_address: 'AA:BB:CC:DD:EE:02', team_id: null, team_number: 2, is_connected: false, last_seen: null, flash_usage: null, vehicle_class: 'Standard' },
 ];
 
 const SELECTED_EVENT = { id: 1, event_type: 'drag_race' };
@@ -30,7 +30,7 @@ describe('Sidebar — team mode', () => {
 
   test('shows ECU serial number for team with ECU', () => {
     render(<Sidebar events={[]} selectedEvent={SELECTED_EVENT} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
-    expect(screen.getByText('ECU #1001')).toBeInTheDocument();
+    expect(screen.getByText('AA:BB:CC:DD:EE:01')).toBeInTheDocument();
   });
 
   test('shows empty state when no teams exist', () => {

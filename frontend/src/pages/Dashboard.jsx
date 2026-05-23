@@ -313,7 +313,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   // ecuData.is_connected reflects whether the physical ECU is sending frames (last_seen within 10s).
   // isConnected only tells us the WebSocket to the backend is open — always true while backend runs.
   const ecuIsConnected = ecuData?.is_connected ?? false;
-  const sessionTime = useSessionTimer(ecuIsConnected);
 
   // Fetch ECU config + violations when the selected ECU changes
   useEffect(() => {
