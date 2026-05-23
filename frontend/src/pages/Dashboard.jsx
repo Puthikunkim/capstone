@@ -750,7 +750,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           </div>
           {currentView === "live" ? (
             !isConnected && chartData.length === 0 ? (
-              <div className="chart-empty">
+              <div className="chart-empty" data-testid="chart-empty">
                 <p>Waiting for data stream</p>
                 <span>Start monitoring to see live data</span>
               </div>
@@ -794,7 +794,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           </div>
           {powerView === "live" ? (
             !isConnected && chartData.length === 0 ? (
-              <div className="chart-empty">
+              <div className="chart-empty" data-testid="chart-empty">
                 <p>Waiting for data stream</p>
                 <span>Start monitoring to see live data</span>
               </div>

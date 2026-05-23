@@ -101,7 +101,7 @@ describe('Dashboard — chart', () => {
   test('shows empty chart placeholder when disconnected and no data', async () => {
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() =>
-      expect(screen.getByTestId('chart-empty')).toBeInTheDocument()
+      expect(screen.getAllByTestId('chart-empty')).toHaveLength(3)
     );
   });
 
@@ -109,7 +109,7 @@ describe('Dashboard — chart', () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
     render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() =>
-      expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2)
+      expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(3)
     );
   });
 });
@@ -127,8 +127,8 @@ describe('Dashboard — Live/History toggle', () => {
   test('renders Live and History toggle buttons for each chart', async () => {
     render(<Dashboard selectedEcuId={1} />);
     await waitFor(() => expect(screen.getByTestId('connection-status')).toBeInTheDocument());
-    expect(screen.getAllByRole('button', { name: 'Live' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'History' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Live' })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: 'History' })).toHaveLength(3);
   });
 
   test('Live buttons are active and History buttons are not by default', async () => {
@@ -145,22 +145,22 @@ describe('Dashboard — Live/History toggle', () => {
   test('clicking History on voltage chart shows HistoryChart and removes one TelemetryChart', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
     render(<Dashboard selectedEcuId={1} teamId={1} />);
-    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(3));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
 
-    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(1);
+    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2);
     expect(screen.getByTestId('history-chart')).toBeInTheDocument();
   });
 
   test('clicking History on current chart shows HistoryChart and removes one TelemetryChart', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
     render(<Dashboard selectedEcuId={1} teamId={1} />);
-    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(3));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[1]);
 
-    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(1);
+    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2);
     expect(screen.getByTestId('history-chart')).toBeInTheDocument();
   });
 
@@ -182,20 +182,20 @@ describe('Dashboard — Live/History toggle', () => {
   test('clicking Live after History switches back to TelemetryChart', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
     render(<Dashboard selectedEcuId={1} teamId={1} />);
-    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(3));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
     expect(screen.getByTestId('history-chart')).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Live' })[0]);
     expect(screen.queryByTestId('history-chart')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2);
+    expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(3);
   });
 
   test('toggles reset to Live when a different ECU is selected', async () => {
     fetchEcuHistory.mockResolvedValue(HISTORY);
     const { rerender } = render(<Dashboard selectedEcuId={1} teamId={1} />);
-    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId('telemetry-chart')).toHaveLength(3));
 
     fireEvent.click(screen.getAllByRole('button', { name: 'History' })[0]);
     expect(screen.getByTestId('history-chart')).toBeInTheDocument();
