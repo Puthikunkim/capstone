@@ -55,7 +55,7 @@ function CompetitionDetailModal({ competition, allTeams, onClose, onOpen, onTeam
   }, [competition.id]);
 
   const existingIds = new Set([...(teams ?? []).map((t) => t.id), ...addedIds]);
-  const addableTeams = allTeams.filter((t) => !existingIds.has(t.id));
+  const addableTeams = allTeams.filter((t) => !existingIds.has(t.id) && !t.competition_id);
   const filteredAddable = addSearch
     ? addableTeams.filter((t) => t.name.toLowerCase().includes(addSearch.toLowerCase()))
     : addableTeams;

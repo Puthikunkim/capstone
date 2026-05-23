@@ -61,6 +61,9 @@ export const unassignEcuFromTeam = (teamId, ecuId) =>
 export const addTeamToCompetition = (competitionId, teamId) =>
   request(`/competitions/${competitionId}/teams/${teamId}`, { method: "POST" });
 
+export const removeTeamFromCompetition = (competitionId, teamId) =>
+  request(`/competitions/${competitionId}/teams/${teamId}`, { method: "DELETE" });
+
 // ── Event Participants ────────────────────────────────────────────────
 export const fetchEventParticipants = (eventId) =>
   request(`/event-participants/?event_id=${eventId}`);

@@ -29,7 +29,7 @@ export function AddTeamToCompetitionModal({ competition, competitionTeams, onTea
   }, []);
 
   const available = allTeams.filter(
-    (t) => !competitionTeamIds.has(t.id) && !addedIds.has(t.id)
+    (t) => !competitionTeamIds.has(t.id) && !addedIds.has(t.id) && !t.competition_id
   );
   const filtered = query
     ? available.filter((t) => t.name.toLowerCase().includes(query.toLowerCase()))

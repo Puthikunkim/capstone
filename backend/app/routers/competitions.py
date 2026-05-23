@@ -18,9 +18,11 @@ from app.services.competitions import (
 from app.services.teams import (
     TeamAlreadyInCompetitionError,
     TeamInDifferentCompetitionError,
+    TeamNotInCompetitionError,
     add_team_to_competition,
     get_team,
     list_teams_by_competition,
+    remove_team_from_competition,
 )
 
 router = APIRouter(prefix="/competitions", tags=["competitions"])
@@ -66,4 +68,18 @@ def add_team_to_competition_entry(competition_id: int, team_id: int, db: Session
     try:
         return add_team_to_competition(db, team, competition_id)
     except (TeamAlreadyInCompetitionError, TeamInDifferentCompetitionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/{competition_id}/teams/{team_id}", response_model=TeamResponse)
+def remove_team_from_competition_entry(competition_id: int, team_id: int, db: Session = Depends(get_db)):
+    competition = get_competition(db, competition_id)
+    if competition is None:
+        raise HTTPException(status_code=404, detail="Competition not found")
+    team = get_team(db, team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found")
+    try:
+        return remove_team_from_competition(db, team, competition_id)
+    except TeamNotInCompetitionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

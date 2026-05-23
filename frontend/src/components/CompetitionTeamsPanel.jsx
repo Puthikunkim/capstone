@@ -6,13 +6,16 @@ function ecuStatus(ecu) {
   return { label: "Never seen", cls: "disconnected" };
 }
 
-function TeamCard({ team, ecu }) {
+function TeamCard({ team, ecu, onRemove }) {
   const status = ecu ? ecuStatus(ecu) : null;
   return (
     <div className="ct-team-card">
       <div className="ct-team-top">
         <span className="ct-team-name">{team.name}</span>
-        {ecu && <div className={`ecu-dot ${status.cls}`} aria-label={status.label} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {ecu && <div className={`ecu-dot ${status.cls}`} aria-label={status.label} />}
+          <button className="ct-remove-btn" onClick={() => onRemove(team)} title="Remove from competition">✕</button>
+        </div>
       </div>
       <div className="ct-team-meta">
         {team.vehicle_class} Class · {team.vehicle_type?.charAt(0).toUpperCase() + (team.vehicle_type?.slice(1) ?? "")}
@@ -29,9 +32,10 @@ function TeamCard({ team, ecu }) {
 TeamCard.propTypes = {
   team: PropTypes.object.isRequired,
   ecu: PropTypes.object,
+  onRemove: PropTypes.func.isRequired,
 };
 
-export function CompetitionTeamsPanel({ teams, ecuList, onAddTeam }) {
+export function CompetitionTeamsPanel({ teams, ecuList, onAddTeam, onRemoveTeam }) {
   return (
     <div className="ct-panel">
       <div className="ct-header">
@@ -60,7 +64,7 @@ export function CompetitionTeamsPanel({ teams, ecuList, onAddTeam }) {
         <div className="ct-grid">
           {teams.map((team) => {
             const ecu = ecuList.find((e) => e.team_id === team.id);
-            return <TeamCard key={team.id} team={team} ecu={ecu} />;
+            return <TeamCard key={team.id} team={team} ecu={ecu} onRemove={onRemoveTeam} />;
           })}
         </div>
       )}
@@ -72,4 +76,5 @@ CompetitionTeamsPanel.propTypes = {
   teams: PropTypes.array.isRequired,
   ecuList: PropTypes.array.isRequired,
   onAddTeam: PropTypes.func.isRequired,
+  onRemoveTeam: PropTypes.func.isRequired,
 };
