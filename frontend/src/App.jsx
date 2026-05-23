@@ -306,6 +306,7 @@ export default function App() {
             violatingEcuIds={violatingEcuIds}
             onSelectTeam={handleSelectTeam}
             onUnassignEcu={handleUnassignEcu}
+            onClearTeam={() => setSelectedTeam(null)}
           />
         )}
         <main className="main-content">
