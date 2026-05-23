@@ -257,23 +257,6 @@ EventTimingCard.propTypes = {
   onSave: PropTypes.func,
 };
 
-// ── Session timer ────────────────────────────────────────────────────
-
-function useSessionTimer(active) {
-  const [seconds, setSeconds] = useState(0);
-
-  useEffect(() => {
-    if (!active) return; // pause when ECU is offline — don't reset accumulated time
-    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [active]);
-
-  const h = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const s = String(seconds % 60).padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
-
 // ── Dashboard ────────────────────────────────────────────────────────
 
 export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCreateTeam, onUnassign, participant, onSaveParticipant }) {
