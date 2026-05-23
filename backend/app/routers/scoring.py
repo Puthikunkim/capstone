@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.scoring import ScoringEnergySource, ScoringEventResponse, ScoringMetric
-from app.services.scoring import score_event_from_energy
+from app.schemas.scoring import EventLeaderboardResponse, ScoringEnergySource, ScoringEventResponse, ScoringMetric
+from app.services.scoring import compute_event_leaderboard, score_event_from_energy
 
 router = APIRouter(prefix="/scoring", tags=["scoring"])
 
@@ -65,3 +65,14 @@ def get_efficiency_leaderboard(
         include_inactive=include_inactive,
         energy_source=ScoringEnergySource.INTEGRATED_POWER,
     )
+
+
+@router.get("/event-leaderboard/{event_id}", response_model=EventLeaderboardResponse)
+def get_event_leaderboard(event_id: int, db: Session = Depends(get_db)):
+    """Efficiency leaderboard for an event.
+
+    Each team is scored over their own EventParticipant window (start → start + duration,
+    capped at 30 s). Lower energy = more efficient = higher rank.
+    Teams without a start time appear unranked at the bottom.
+    """
+    return compute_event_leaderboard(db, event_id)

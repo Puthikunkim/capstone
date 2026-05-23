@@ -18,7 +18,7 @@ function TeamCard({ team, ecu }) {
         {team.vehicle_class} Class · {team.vehicle_type?.charAt(0).toUpperCase() + (team.vehicle_type?.slice(1) ?? "")}
       </div>
       {ecu ? (
-        <div className="ct-team-ecu">ECU #{ecu.serial_number}</div>
+        <div className="ct-team-ecu">{ecu.mac_address ?? "—"}</div>
       ) : (
         <div className="ct-team-no-ecu">No ECU assigned</div>
       )}

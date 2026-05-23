@@ -42,6 +42,20 @@ function expandFrames(frames) {
   return points;
 }
 
+// Trapezoidal integration of V×I over time. O(n) in the number of points passed.
+// Call with a small slice (e.g. one frame delta) to keep per-frame cost O(1).
+function integratePointsWh(pts) {
+  let wh = 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].voltage == null || pts[i].current == null) continue;
+    if (pts[i - 1].voltage == null || pts[i - 1].current == null) continue;
+    const dt = (new Date(pts[i].timestamp) - new Date(pts[i - 1].timestamp)) / 3_600_000;
+    const avgPower = (pts[i - 1].voltage * pts[i - 1].current + pts[i].voltage * pts[i].current) / 2;
+    wh += avgPower * dt;
+  }
+  return wh;
+}
+
 // ── Small UI helpers ──────────────────────────────────────────────────
 
 function StatCard({ icon, label, value, unit, sub, subStyle }) {
@@ -243,26 +257,6 @@ EventTimingCard.propTypes = {
   onSave: PropTypes.func,
 };
 
-// ── Session timer ────────────────────────────────────────────────────
-
-function useSessionTimer(active) {
-  const [seconds, setSeconds] = useState(0);
-  const intervalRef = useRef(null);
-
-  useEffect(() => {
-    setSeconds(0);
-    if (active) {
-      intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
-    }
-    return () => clearInterval(intervalRef.current);
-  }, [active]);
-
-  const h = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const s = String(seconds % 60).padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
-
 // ── Dashboard ────────────────────────────────────────────────────────
 
 export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCreateTeam, onUnassign, participant, onSaveParticipant }) {
@@ -273,7 +267,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const [monitoring, setMonitoring] = useState(true);
   const [voltageView, setVoltageView] = useState("live");
   const [currentView, setCurrentView] = useState("live");
-  const lastFrameTsRef = useRef(null); // timestamp of the last received frame
+  const lastFrameTsRef = useRef(null);    // timestamp of the last received frame
+  const energyAccRef = useRef(0);         // running energy total (Wh)
+  const lastEnergyPointRef = useRef(null); // last sample point used in integration
+  const [totalEnergyWh, setTotalEnergyWh] = useState(null);
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -296,7 +293,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
 
   const activeTeamId = monitoring ? teamId : null;
   const { isConnected, liveData } = useTeamWebSocket(activeTeamId);
-  const sessionTime = useSessionTimer(isConnected);
+  // ecuData.is_connected reflects whether the physical ECU is sending frames (last_seen within 10s).
+  // isConnected only tells us the WebSocket to the backend is open — always true while backend runs.
+  const ecuIsConnected = ecuData?.is_connected ?? false;
 
   // Fetch ECU config + violations when the selected ECU changes
   useEffect(() => {
@@ -340,6 +339,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       setChartData([]);
       setHistoryPoints([]);
       lastFrameTsRef.current = null;
+      energyAccRef.current = 0;
+      lastEnergyPointRef.current = null;
+      setTotalEnergyWh(null);
       setVoltageView("live");
       setCurrentView("live");
       return;
@@ -348,6 +350,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     setChartData([]);
     setHistoryPoints([]);
     lastFrameTsRef.current = null;
+    energyAccRef.current = 0;
+    lastEnergyPointRef.current = null;
+    setTotalEnergyWh(null);
     setVoltageView("live");
     setCurrentView("live");
 
@@ -360,22 +365,31 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
           if (sorted.length > 0) lastFrameTsRef.current = sorted[sorted.length - 1].timestamp;
           const expanded = expandFrames(sorted);
+          const energy = integratePointsWh(expanded);
+          energyAccRef.current = energy;
+          lastEnergyPointRef.current = expanded[expanded.length - 1] ?? null;
+          setTotalEnergyWh(expanded.length > 0 ? energy : null);
           setHistoryPoints(expanded);
           setChartData(expanded.slice(-200));
         })
         .catch(() => {});
     } else {
-      // No timing: live chart seeds from last 100 ECU frames, history shows all ECU frames
+      // No timing: live chart seeds from last 100 ECU frames, history shows last 10 000 frames (~17 min at 10 fps)
       const livePromise = fetchEcuHistory(selectedEcuId, { limit: 100, teamId });
-      const historyPromise = fetchEcuHistory(selectedEcuId, { teamId });
+      const historyPromise = fetchEcuHistory(selectedEcuId, { limit: 10000, teamId });
       Promise.all([livePromise, historyPromise])
         .then(([liveFrames, allFrames]) => {
           const sortFn = (a, b) => new Date(a.timestamp) - new Date(b.timestamp);
           const sortedLive = [...liveFrames].sort(sortFn);
           const sortedAll = [...allFrames].sort(sortFn);
           if (sortedLive.length > 0) lastFrameTsRef.current = sortedLive[sortedLive.length - 1].timestamp;
+          const expandedAll = expandFrames(sortedAll);
+          const energy = integratePointsWh(expandedAll);
+          energyAccRef.current = energy;
+          lastEnergyPointRef.current = expandedAll[expandedAll.length - 1] ?? null;
+          setTotalEnergyWh(expandedAll.length > 0 ? energy : null);
           setChartData(expandFrames(sortedLive).slice(-200));
-          setHistoryPoints(expandFrames(sortedAll));
+          setHistoryPoints(expandedAll);
         })
         .catch(() => {});
     }
@@ -392,17 +406,29 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     return () => clearInterval(id);
   }, [selectedEcuId, isConnected]);
 
-  // Expand incoming live frame into sample points and append to charts
+  // Expand incoming live frame into sample points, append to charts, and
+  // accumulate energy incrementally — O(samples-per-frame) instead of O(all history).
   useEffect(() => {
     if (!liveData) return;
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
+
+    // Integrate only the delta: [last known point, ...new points]
+    const anchor = lastEnergyPointRef.current;
+    const delta = integratePointsWh(anchor ? [anchor, ...newPoints] : newPoints);
+    energyAccRef.current += delta;
+    lastEnergyPointRef.current = newPoints[newPoints.length - 1] ?? anchor;
+    setTotalEnergyWh(energyAccRef.current);
+
     setChartData((prev) => {
       const next = [...prev, ...newPoints];
       return next.length > 200 ? next.slice(-200) : next;
     });
-    setHistoryPoints((prev) => [...prev, ...newPoints]);
+    setHistoryPoints((prev) => {
+      const next = [...prev, ...newPoints];
+      return next.length > 100000 ? next.slice(-100000) : next;
+    });
   }, [liveData]);
 
   // ── Config form ──────────────────────────────────────────────────
@@ -529,6 +555,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     ? `${Math.round(ecuData.flash_usage / 1024)} KB`
     : "--";
 
+
   return (
     <div className="dashboard">
       {/* ── Header ── */}
@@ -545,20 +572,13 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               </svg>
               {classLabel}
             </span>
-            <span className={`meta-item status-live ${isConnected ? "active" : ""}`} data-testid="connection-status">
+            <span className={`meta-item status-live ${ecuIsConnected ? "active" : ""}`} data-testid="connection-status">
               <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
                 <path d="M2 8c0-3.314 2.686-6 6-6s6 2.686 6 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <path d="M4.5 8c0-1.933 1.567-3.5 3.5-3.5S11.5 6.067 11.5 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                 <circle cx="8" cy="8" r="1.5" fill="currentColor" />
               </svg>
-              {isConnected ? "Live" : "Disconnected"}
-            </span>
-            <span className="meta-item">
-              <svg viewBox="0 0 16 16" fill="none" className="meta-icon" width="12" height="12">
-                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
-                <path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-              {sessionTime}
+              {ecuIsConnected ? "Live" : "Disconnected"}
             </span>
           </div>
         </div>
@@ -649,9 +669,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Energy"
-          value={lastSample?.energy != null ? lastSample.energy.toFixed(1) : null}
-          unit="Wh"
-          sub={lastSample?.energy != null ? "Latest frame" : "No data"}
+          value={totalEnergyWh != null ? Math.abs(totalEnergyWh) < 1 ? (totalEnergyWh * 1000).toFixed(2) : totalEnergyWh.toFixed(3) : null}
+          unit={totalEnergyWh != null && Math.abs(totalEnergyWh) < 1 ? "mWh" : "Wh"}
+          sub={totalEnergyWh != null ? "Cumulative (session)" : "No data"}
           subStyle="sub-muted"
         />
       </div>
@@ -754,7 +774,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           <div className="card-header">
             <span className="card-title">ECU Configuration</span>
             <div className="card-header-right">
-              <span className="card-serial">#{ecuData?.serial_number ?? "--"}</span>
+              <span className="card-serial">ECU #{ecuData?.id ?? "--"}</span>
               {onUnassign && (
                 <button className="btn-unassign" onClick={onUnassign} title="Unassign ECU from team">
                   Unassign ECU
@@ -766,10 +786,19 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           <form className="config-form" onSubmit={handleConfigSubmit}>
             <div className="form-row">
               <div className="form-field">
-                <label>ECU Serial Number</label>
+                <label>ECU ID</label>
                 <input
                   type="text"
-                  value={ecuData?.serial_number ?? ""}
+                  value={ecuData?.id ?? ""}
+                  readOnly
+                  className="form-input readonly"
+                />
+              </div>
+              <div className="form-field">
+                <label>MAC Address</label>
+                <input
+                  type="text"
+                  value={ecuData?.mac_address ?? ""}
                   readOnly
                   className="form-input readonly"
                 />

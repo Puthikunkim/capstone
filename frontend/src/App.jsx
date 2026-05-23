@@ -10,13 +10,15 @@ import {
   fetchEcus,
   fetchCompetitionTeams,
   unassignEcuFromTeam,
-  fetchAlerts,
   fetchOpenViolations,
   fetchEventParticipants,
   updateEventParticipant,
 } from "./api/http";
+import { useViolationsWebSocket } from "./hooks/useWebSocket";
+import { NotificationPanel } from "./components/NotificationPanel";
 import { AddTeamToCompetitionModal } from "./components/AddTeamToCompetitionModal";
 import { CompetitionTeamsPanel } from "./components/CompetitionTeamsPanel";
+import { LeaderboardPage } from "./pages/LeaderboardPage";
 import "./App.css";
 
 export default function App() {
@@ -31,7 +33,14 @@ export default function App() {
   const [showAddTeam, setShowAddTeam] = useState(false);
   const [showAssignEcu, setShowAssignEcu] = useState(false);
   const [violatingEcuIds, setViolatingEcuIds] = useState(new Set());
-  const alertBaselineRef = useRef(null);
+  const [violationLog, setViolationLog] = useState([]);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  // tracks which ecu_ids have escalated (confirmed violation) so "ended" knows whether to log
+  const escalatedEcuIdsRef = useRef(new Set());
+  // stable refs for ecuList / competitionTeams so the WS callback never goes stale
+  const ecuListRef = useRef([]);
+  const competitionTeamsRef = useRef([]);
 
   useEffect(() => {
     fetchEcus().then(setEcuList).catch(() => setBackendError(true));
@@ -75,50 +84,76 @@ export default function App() {
       .catch(() => setEventParticipants([]));
   }, [selectedEvent]);
 
-  // Reset alert baseline when competition changes
+  // Keep refs in sync so the WS violation handler always sees current state
+  useEffect(() => { ecuListRef.current = ecuList; }, [ecuList]);
+  useEffect(() => { competitionTeamsRef.current = competitionTeams; }, [competitionTeams]);
+
+  // Reset violation log and dot state when competition changes
   useEffect(() => {
-    alertBaselineRef.current = new Date().toISOString();
+    setViolationLog([]);
+    setUnreadCount(0);
+    escalatedEcuIdsRef.current = new Set();
   }, [selectedCompetition]);
 
-  // Poll for new alerts across all competition ECUs and fire toasts
-  useEffect(() => {
-    if (!selectedCompetition || competitionTeams.length === 0) return;
+  // Violations WebSocket — reacts to backend-pushed events
+  useViolationsWebSocket((event) => {
+    const { transition, ecu_id, team_id, is_warning, duration_seconds, penalty_seconds, start_timestamp } = event;
 
-    const ecuIds = new Set(ecuList.filter((e) => {
-      const teamIds = new Set(competitionTeams.map((t) => t.id));
-      return e.team_id && teamIds.has(e.team_id);
-    }).map((e) => e.id));
+    // ECU not assigned to any team — ignore completely
+    if (team_id == null) return;
 
-    if (ecuIds.size === 0) return;
+    // team_id comes directly from the backend (live DB value), so it's never stale.
+    // If found in competitionTeamsRef, the ECU belongs to the competition currently on screen.
+    const team = competitionTeamsRef.current.find((t) => t.id === team_id);
+    const inCurrentCompetition = team != null;
+    const label = team?.name ?? `ECU #${ecu_id}`;
 
-    const poll = async () => {
-      try {
-        const alerts = await fetchAlerts({ start: alertBaselineRef.current, limit: 50 });
-        const relevant = alerts.filter((a) => ecuIds.has(a.ecu_id));
-        if (relevant.length === 0) return;
-
-        const latest = relevant.reduce((max, a) =>
-          new Date(a.timestamp) > new Date(max.timestamp) ? a : max
-        );
-        alertBaselineRef.current = latest.timestamp;
-
-        relevant.forEach((alert) => {
-          const ecu = ecuList.find((e) => e.id === alert.ecu_id);
-          const team = competitionTeams.find((t) => t.id === ecu?.team_id);
-          const label = team?.name ?? `ECU #${ecu?.serial_number ?? alert.ecu_id}`;
-          toast.warning(
-            `⚡ ${label}: ${alert.power_watts.toFixed(0)}W exceeded limit of ${alert.limit_watts.toFixed(0)}W`,
-            { toastId: `alert-${alert.id}`, autoClose: 6000 }
-          );
+    if (transition === "started") {
+      if (inCurrentCompetition) {
+        toast.warning(`⚡ ${label}: power limit exceeded`, {
+          toastId: `warn-${ecu_id}`,
+          autoClose: 3000,
         });
-      } catch {
-        // silently ignore poll failures
       }
-    };
-
-    const id = setInterval(poll, 5000);
-    return () => clearInterval(id);
-  }, [selectedCompetition, competitionTeams, ecuList]);
+    } else if (transition === "escalated") {
+      if (inCurrentCompetition) {
+        toast.dismiss(`warn-${ecu_id}`);
+        toast.error(`🚨 ${label}: power violation confirmed`, {
+          toastId: `viol-${ecu_id}`,
+          autoClose: false,
+        });
+        setViolatingEcuIds((prev) => new Set([...prev, ecu_id]));
+      }
+      escalatedEcuIdsRef.current.add(ecu_id);
+    } else if (transition === "ended") {
+      if (inCurrentCompetition) {
+        toast.dismiss(`warn-${ecu_id}`);
+        toast.dismiss(`viol-${ecu_id}`);
+        setViolatingEcuIds((prev) => {
+          const next = new Set(prev);
+          next.delete(ecu_id);
+          return next;
+        });
+      }
+      if (escalatedEcuIdsRef.current.has(ecu_id)) {
+        escalatedEcuIdsRef.current.delete(ecu_id);
+        // Log the entry regardless of competition — panel badge covers non-competition teams too
+        const entry = {
+          id: event.id,
+          teamName: label,
+          startTimestamp: start_timestamp,
+          durationSeconds: duration_seconds,
+          penaltySeconds: penalty_seconds,
+          isWarning: is_warning,
+        };
+        setViolationLog((prev) => [entry, ...prev]);
+        setPanelOpen((open) => {
+          if (!open) setUnreadCount((n) => n + 1);
+          return open;
+        });
+      }
+    }
+  });
 
   // Poll for active violations to drive the red dot on team cards
   useEffect(() => {
@@ -244,6 +279,8 @@ export default function App() {
         competition={selectedCompetition}
         selectedEvent={selectedEvent}
         onBack={() => setSelectedCompetition(null)}
+        onTogglePanel={() => { setPanelOpen((v) => !v); setUnreadCount(0); }}
+        unreadCount={unreadCount}
       />
       <div className="app-body">
         {!backendError && (
@@ -266,6 +303,11 @@ export default function App() {
               teams={competitionTeams}
               ecuList={competitionEcus}
               onAddTeam={() => setShowAddTeam(true)}
+            />
+          ) : !selectedTeam ? (
+            <LeaderboardPage
+              eventId={selectedEvent.id}
+              eventType={selectedEvent.event_type}
             />
           ) : selectedTeam && !hasEcu ? (
             <div className="dashboard">
@@ -313,6 +355,13 @@ export default function App() {
           team={selectedTeam}
           onAssigned={handleEcuAssigned}
           onClose={() => setShowAssignEcu(false)}
+        />
+      )}
+
+      {panelOpen && (
+        <NotificationPanel
+          entries={violationLog}
+          onClose={() => setPanelOpen(false)}
         />
       )}
 

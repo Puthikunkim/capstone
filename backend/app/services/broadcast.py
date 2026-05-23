@@ -51,7 +51,7 @@ class ConnectionManager:
                 for ws in dead:
                     self._channels[channel].discard(ws)
 
-    async def notify_violation_event(self, event: Any, transition: str) -> None:
+    async def notify_violation_event(self, event: Any, transition: str, team_id: int | None = None) -> None:
         """Serialize a PowerViolationEvent and push it to the global 'violations' channel."""
 
         def _dt(value: datetime | None) -> str | None:
@@ -72,6 +72,7 @@ class ConnectionManager:
             "frame_count": event.frame_count,
             "is_warning": event.is_warning,
             "trigger_frame_id": event.trigger_frame_id,
+            "team_id": team_id,
         }
         await self.notify("violations", payload)
 
