@@ -26,7 +26,7 @@ static const char *TAG = "SENDER";
 #define ADC_VOLTAGE_CHANNEL   ADC_CHANNEL_7
 #define SAMPLES_PER_FRAME     10
 #define MAX_FRAMES_PER_PKT    3
-#define SENDER_BUFFER_SIZE    3000
+#define SENDER_BUFFER_SIZE    2000
 #define ACK_TIMEOUT_MS        200
 #define BUZZER_GPIO           GPIO_NUM_19
 #define BUZZER_BEEP_HALF_MS   125   // 4 Hz beep: 125 ms on, 125 ms off
@@ -83,8 +83,8 @@ typedef struct {
 typedef struct {
     uint16_t counter;
     uint32_t time_100ms;  // uint16_t overflowed at ~109 min boot time
-    uint8_t  current_packed[15];
-    uint8_t  voltage_packed[15];
+    int16_t  current_mv[SAMPLES_PER_FRAME];
+    int16_t  voltage_mv[SAMPLES_PER_FRAME];
 } buffered_frame_t;
 
 static buffered_frame_t send_buffer[SENDER_BUFFER_SIZE];
@@ -291,29 +291,6 @@ static void flash_init(void) {
 /*---------------------------------------------------------------
     Buffer management
 ---------------------------------------------------------------*/
-static void pack_12bit(const uint16_t *in, uint8_t *out, int count) {
-    int j = 0;
-    for (int i = 0; i < count; i += 2) {
-        uint16_t a = in[i] & 0x0FFF;
-        uint16_t b = (i + 1 < count) ? (in[i + 1] & 0x0FFF) : 0;
-        out[j++] = a & 0xFF;
-        out[j++] = ((a >> 8) & 0x0F) | ((b & 0x0F) << 4);
-        out[j++] = (b >> 4) & 0xFF;
-    }
-}
-
-static void unpack_12bit(const uint8_t *in, uint16_t *out, int count) {
-    int j = 0;
-    for (int i = 0; i < count; i += 2) {
-        uint8_t b0 = in[j++];
-        uint8_t b1 = in[j++];
-        uint8_t b2 = in[j++];
-        out[i] = b0 | ((b1 & 0x0F) << 8);
-        if (i + 1 < count)
-            out[i + 1] = ((b1 >> 4) & 0x0F) | (b2 << 4);
-    }
-}
-
 static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
     uint16_t slot = next_counter % SENDER_BUFFER_SIZE;
     buffered_frame_t *f = &send_buffer[slot];
@@ -321,16 +298,10 @@ static void buffer_push(int16_t *current_mv, int16_t *voltage_mv) {
     f->counter    = next_counter;
     f->time_100ms = (uint32_t)(esp_timer_get_time() / 100000);
 
-    uint16_t tmp_c[SAMPLES_PER_FRAME];
-    uint16_t tmp_v[SAMPLES_PER_FRAME];
-
     for (int i = 0; i < SAMPLES_PER_FRAME; i++) {
-        tmp_c[i] = (uint16_t)current_mv[i];
-        tmp_v[i] = (uint16_t)voltage_mv[i];
+        f->current_mv[i] = current_mv[i];
+        f->voltage_mv[i] = voltage_mv[i];
     }
-
-    pack_12bit(tmp_c, f->current_packed, SAMPLES_PER_FRAME);
-    pack_12bit(tmp_v, f->voltage_packed, SAMPLES_PER_FRAME);
 
     if ((next_counter - confirmed_floor) >= SENDER_BUFFER_SIZE)
         confirmed_floor = next_counter - SENDER_BUFFER_SIZE + 1;
@@ -373,15 +344,9 @@ static uint8_t build_packet(adc_packet_t *pkt) {
         int64_t epoch = time_synced ? (sync_base_us + (frame_boot_us - sync_boot_us)) : 0LL;
         dst->tx_epoch_us = (epoch > 0) ? epoch : 0LL;
 
-        uint16_t tmp_current[SAMPLES_PER_FRAME];
-        uint16_t tmp_voltage[SAMPLES_PER_FRAME];
-
-        unpack_12bit(f->current_packed, tmp_current, SAMPLES_PER_FRAME);
-        unpack_12bit(f->voltage_packed, tmp_voltage, SAMPLES_PER_FRAME);
-
         for (int i = 0; i < SAMPLES_PER_FRAME; i++) {
-            dst->current_mv[i] = (int16_t)tmp_current[i];
-            dst->voltage_mv[i] = (int16_t)tmp_voltage[i];
+            dst->current_mv[i] = f->current_mv[i];
+            dst->voltage_mv[i] = f->voltage_mv[i];
         }
     }
 
