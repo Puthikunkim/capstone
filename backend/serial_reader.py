@@ -250,7 +250,7 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
                         ser.flush()
                         logger.info("Time sync sent: %s", ts)
                     else:
-                        logger.info("RX non-JSON: %r", line[:120])
+                        logger.debug("RX non-JSON: %r", line[:120])
                     continue
                 packet = parse_packet(line)
                 if packet is None:

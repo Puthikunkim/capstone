@@ -74,6 +74,7 @@ export function Sidebar({
   violatingEcuIds,
   onSelectTeam,
   onUnassignEcu,
+  onClearTeam,
 }) {
   const [query, setQuery] = useState("");
 
@@ -125,6 +126,14 @@ export function Sidebar({
           </svg>
           {EVENT_LABELS[selectedEvent.event_type] ?? selectedEvent.event_type}
         </button>
+        {selectedTeamId && onClearTeam && (
+          <button className="sidebar-back-btn" onClick={onClearTeam}>
+            <svg viewBox="0 0 16 16" fill="none" width="12" height="12">
+              <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Leaderboard
+          </button>
+        )}
       </div>
 
       <div className="sidebar-search" style={{ paddingTop: 0 }}>
@@ -183,4 +192,5 @@ Sidebar.propTypes = {
   violatingEcuIds: PropTypes.instanceOf(Set),
   onSelectTeam: PropTypes.func.isRequired,
   onUnassignEcu: PropTypes.func,
+  onClearTeam: PropTypes.func,
 };

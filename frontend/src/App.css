@@ -648,6 +648,10 @@ body {
 }
 
 .competitions-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 32px;
 }
 .competitions-heading h1 {
@@ -1283,6 +1287,23 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.ct-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+.ct-remove-btn:hover {
+  opacity: 1;
+  color: var(--danger, #e05252);
 }
 
 .ct-team-name {

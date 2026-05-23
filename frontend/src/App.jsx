@@ -13,6 +13,7 @@ import {
   fetchOpenViolations,
   fetchEventParticipants,
   updateEventParticipant,
+  removeTeamFromCompetition,
 } from "./api/http";
 import { useViolationsWebSocket } from "./hooks/useWebSocket";
 import { NotificationPanel } from "./components/NotificationPanel";
@@ -220,6 +221,16 @@ export default function App() {
     setSelectedTeam(team);
   }
 
+  async function handleRemoveTeam(team) {
+    try {
+      await removeTeamFromCompetition(selectedCompetition.id, team.id);
+      setCompetitionTeams((prev) => prev.filter((t) => t.id !== team.id));
+      if (selectedTeam?.id === team.id) setSelectedTeam(null);
+    } catch (err) {
+      toast.error(err.message || "Failed to remove team");
+    }
+  }
+
   function handleEcuAssigned(ecuId) {
     refreshCompetitionData();
     setSelectedEcuId(ecuId);
@@ -295,6 +306,7 @@ export default function App() {
             violatingEcuIds={violatingEcuIds}
             onSelectTeam={handleSelectTeam}
             onUnassignEcu={handleUnassignEcu}
+            onClearTeam={() => setSelectedTeam(null)}
           />
         )}
         <main className="main-content">
@@ -303,6 +315,7 @@ export default function App() {
               teams={competitionTeams}
               ecuList={competitionEcus}
               onAddTeam={() => setShowAddTeam(true)}
+              onRemoveTeam={handleRemoveTeam}
             />
           ) : !selectedTeam ? (
             <LeaderboardPage
