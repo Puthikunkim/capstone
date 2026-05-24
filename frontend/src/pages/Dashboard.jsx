@@ -672,10 +672,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Voltage"
-          value={lastSample?.voltage?.toFixed(2)}
+          value={ecuIsConnected ? lastSample?.voltage?.toFixed(2) : "-"}
           unit="V"
-          sub={lastSample ? <><span className="stable-dot" /> Stable</> : "No data"}
-          subStyle={lastSample ? "sub-stable" : "sub-muted"}
+          sub={ecuIsConnected && lastSample ? <><span className="stable-dot" /> Stable</> : "No data"}
+          subStyle={ecuIsConnected && lastSample ? "sub-stable" : "sub-muted"}
         />
         <StatCard
           icon={
@@ -685,9 +685,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Current"
-          value={lastFrameAvgCurrent?.toFixed(3)}
+          value={ecuIsConnected ? lastFrameAvgCurrent?.toFixed(3) : "-"}
           unit="A"
-          sub={lastSample ? "Bi-directional" : "No data"}
+          sub={ecuIsConnected && lastSample ? "Bi-directional" : "No data"}
           subStyle="sub-muted"
         />
         <StatCard
@@ -699,13 +699,15 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           }
           label="Power Consumption"
           value={
-            lastSample?.voltage != null && lastSample?.current != null
-              ? (lastSample.voltage * lastSample.current).toFixed(2)
-              : null
+            ecuIsConnected
+              ? lastSample?.voltage != null && lastSample?.current != null
+                ? (lastSample.voltage * lastSample.current).toFixed(2)
+                : null
+              : "-"
           }
           unit="W"
           sub={
-            lastSample?.voltage != null && lastSample?.current != null
+            ecuIsConnected && lastSample?.voltage != null && lastSample?.current != null
               ? (lastSample.voltage * lastSample.current) >= 0 ? "Discharging" : "Charging"
               : "No data"
           }
@@ -720,9 +722,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Energy"
-          value={totalEnergyWh != null ? Math.abs(totalEnergyWh) < 1 ? (totalEnergyWh * 1000).toFixed(2) : totalEnergyWh.toFixed(3) : null}
+          value={ecuIsConnected ? (totalEnergyWh != null ? Math.abs(totalEnergyWh) < 1 ? (totalEnergyWh * 1000).toFixed(2) : totalEnergyWh.toFixed(3) : null) : "-"}
           unit={totalEnergyWh != null && Math.abs(totalEnergyWh) < 1 ? "mWh" : "Wh"}
-          sub={totalEnergyWh != null ? "Cumulative (session)" : "No data"}
+          sub={ecuIsConnected && totalEnergyWh != null ? "Cumulative (session)" : "No data"}
           subStyle="sub-muted"
         />
       </div>
