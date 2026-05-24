@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
 import {
   LineChart,
@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import WebSocketClient from "../api/websocket";
-import { fetchTeamFrames, fetchViolations } from "../api/http";
+import { fetchEcuHistory, fetchViolations } from "../api/http";
 
 const TEAM_COLORS = [
   "#00c6ff", "#f59e0b", "#a78bfa", "#f87171", "#34d399",
@@ -55,7 +55,7 @@ const teamKey = (teamId) => `t_${teamId}`;
 // ── Merge per-team data into a single Recharts-compatible array ───────────────
 // Live: index-aligned using each team's last maxPts points.
 // Avoids server/browser clock-skew by never comparing server timestamps to Date.now().
-function mergeForLiveChart(chartDataByTeam, selectedTeamIds, dataKey, maxPts = 200) {
+function mergeForLiveChart(chartDataByTeam, selectedTeamIds, dataKey, maxPts = 100) {
   if (selectedTeamIds.length === 0) return [];
 
   // Slice each team to the last maxPts points and find the overall newest timestamp.
@@ -120,7 +120,7 @@ function mergeForHistoryChart(historyDataByTeam, selectedTeamIds, dataKey) {
     const label = new Date(t).toLocaleTimeString([], {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
-    const entry = { timeLabel: label };
+    const entry = { timeLabel: label, _ts: t };
     for (const teamId of selectedTeamIds) {
       const pts = historyDataByTeam[teamId] ?? [];
       let bestDiff = Infinity;
@@ -142,7 +142,36 @@ const TOOLTIP_CONTENT_STYLE = {
   borderRadius: 8, fontSize: 12,
 };
 
-function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit }) {
+const PX_PER_POINT = 8;
+
+function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit, onLoadMore, onScrollSync, registerScrollEl }) {
+  const scrollRef        = useRef(null);
+  const isAtEndRef       = useRef(true);
+  const loadingMoreRef   = useRef(false);
+  const prevLengthRef    = useRef(0);
+  const prevFirstTsRef   = useRef(null);
+
+  useEffect(() => {
+    if (registerScrollEl && scrollRef.current) registerScrollEl(scrollRef.current);
+  }, [registerScrollEl]);
+
+  // When history data is prepended, shift scroll right to keep the viewed window stable.
+  useEffect(() => {
+    if (!onLoadMore) return;
+    const el = scrollRef.current;
+    if (!el || !mergedData.length) return;
+    const firstTs = mergedData[0]?._ts ?? null;
+    if (prevFirstTsRef.current !== null && firstTs !== prevFirstTsRef.current) {
+      const added = mergedData.length - prevLengthRef.current;
+      el.scrollLeft += added * PX_PER_POINT;
+      loadingMoreRef.current = false;
+    } else if (isAtEndRef.current) {
+      el.scrollLeft = el.scrollWidth;
+    }
+    prevFirstTsRef.current = firstTs;
+    prevLengthRef.current  = mergedData.length;
+  }, [mergedData, onLoadMore]);
+
   if (selectedTeamIds.length === 0) {
     return (
       <div className="chart-empty">
@@ -171,56 +200,96 @@ function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, un
     parseFloat((max + pad).toFixed(2)),
   ];
 
+  const lines = selectedTeamIds.map((teamId) => (
+    <Line
+      key={teamId}
+      type="monotone"
+      dataKey={teamKey(teamId)}
+      stroke={teamColors[teamId]}
+      dot={false}
+      isAnimationActive={false}
+      strokeWidth={1.5}
+      connectNulls={false}
+    />
+  ));
+
+  const axes = (
+    <>
+      <XAxis
+        dataKey="timeLabel"
+        tick={{ fill: "#6b7a99", fontSize: 11 }}
+        axisLine={{ stroke: "#1e2a3a" }}
+        tickLine={false}
+        interval="preserveStartEnd"
+        minTickGap={60}
+      />
+      <YAxis
+        domain={domain}
+        unit={unit}
+        tick={{ fill: "#6b7a99", fontSize: 11 }}
+        axisLine={false}
+        tickLine={false}
+        width={52}
+      />
+      <Tooltip
+        contentStyle={TOOLTIP_CONTENT_STYLE}
+        labelStyle={{ color: "#e8edf5" }}
+        itemStyle={{ color: "#e8edf5" }}
+        formatter={(v, name) => {
+          const teamId = Number(name.replace("t_", ""));
+          return [
+            v != null ? `${Number(v).toFixed(2)} ${unit}` : "—",
+            teamNames[teamId] ?? name,
+          ];
+        }}
+      />
+      <Legend
+        formatter={(name) => {
+          const teamId = Number(name.replace("t_", ""));
+          return teamNames[teamId] ?? name;
+        }}
+        wrapperStyle={{ fontSize: 12, color: "#6b7a99" }}
+      />
+    </>
+  );
+
+  if (onLoadMore) {
+    const totalWidth = Math.max(600, mergedData.length * PX_PER_POINT);
+    const handleScroll = (e) => {
+      const el = e.currentTarget;
+      isAtEndRef.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
+      if (el.scrollLeft < 300 && !loadingMoreRef.current) {
+        loadingMoreRef.current = true;
+        onLoadMore();
+      }
+      onScrollSync?.(el.scrollLeft);
+    };
+    return (
+      <div
+        ref={scrollRef}
+        className="history-chart-scroll"
+        onScroll={handleScroll}
+      >
+        <div style={{ width: totalWidth, height: 220 }}>
+          <LineChart
+            width={totalWidth}
+            height={220}
+            data={mergedData}
+            margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+          >
+            {axes}
+            {lines}
+          </LineChart>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ResponsiveContainer width="100%" height={220}>
       <LineChart data={mergedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <XAxis
-          dataKey="timeLabel"
-          tick={{ fill: "#6b7a99", fontSize: 11 }}
-          axisLine={{ stroke: "#1e2a3a" }}
-          tickLine={false}
-          interval="preserveStartEnd"
-        />
-        <YAxis
-          domain={domain}
-          unit={unit}
-          tick={{ fill: "#6b7a99", fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          width={52}
-        />
-        <Tooltip
-          contentStyle={TOOLTIP_CONTENT_STYLE}
-          labelStyle={{ color: "#e8edf5" }}
-          itemStyle={{ color: "#e8edf5" }}
-          formatter={(v, name) => {
-            // name is the dataKey string "t_123"; strip prefix to get teamId
-            const teamId = Number(name.replace("t_", ""));
-            return [
-              v != null ? `${Number(v).toFixed(2)} ${unit}` : "—",
-              teamNames[teamId] ?? name,
-            ];
-          }}
-        />
-        <Legend
-          formatter={(name) => {
-            const teamId = Number(name.replace("t_", ""));
-            return teamNames[teamId] ?? name;
-          }}
-          wrapperStyle={{ fontSize: 12, color: "#6b7a99" }}
-        />
-        {selectedTeamIds.map((teamId) => (
-          <Line
-            key={teamId}
-            type="monotone"
-            dataKey={teamKey(teamId)}
-            stroke={teamColors[teamId]}
-            dot={false}
-            isAnimationActive={false}
-            strokeWidth={1.5}
-            connectNulls={false}
-          />
-        ))}
+        {axes}
+        {lines}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -272,7 +341,6 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
 
   // Filter / selection state.
   const [selectedTeamIds, setSelectedTeamIds] = useState(() => new Set(allTeamIds));
-  const [activeTeamId, setActiveTeamId]       = useState(null);
   const [chartView, setChartView]             = useState("live");
 
   // Sync filter when team list changes (new event or new participants).
@@ -280,27 +348,37 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
   useEffect(() => {
     if (prevTeamIdsKeyRef.current !== teamIdsKey) {
       prevTeamIdsKeyRef.current = teamIdsKey;
-      setSelectedTeamIds(new Set(allTeamIds));
-      setActiveTeamId(null);
+      setSelectedTeamIds(new Set());
     }
   });
 
-  // ── Live data: buffer frames in a ref, flush to state at 1 Hz ────────────
-  // This prevents render storms when multiple teams are streaming concurrently.
+  // ── Live data: one WS per selected team, flush to state at 1 Hz ─────────
   const [chartDataByTeam, setChartDataByTeam] = useState({});
-  const pendingPointsRef    = useRef({});  // { teamId: point[] } accumulated since last flush
-  const prevFrameTsRef      = useRef({});  // { teamId: lastFrameTimestamp }
+  const pendingPointsRef = useRef({});
+  const prevFrameTsRef   = useRef({});
+  const flushNowRef      = useRef(null);
+  const wsMapRef         = useRef({});
 
+  // Incrementally open/close connections as selection changes.
   useEffect(() => {
-    const wsMap = {};
-
-    for (const teamId of allTeamIds) {
+    // Close connections for teams no longer selected.
+    for (const idStr of Object.keys(wsMapRef.current)) {
+      const id = Number(idStr);
+      if (!selectedTeamIds.has(id)) {
+        wsMapRef.current[idStr].close();
+        delete wsMapRef.current[idStr];
+        delete pendingPointsRef.current[id];
+        delete prevFrameTsRef.current[id];
+      }
+    }
+    // Open connections for newly selected teams.
+    for (const teamId of selectedTeamIds) {
+      if (wsMapRef.current[teamId]) continue;
       const client = new WebSocketClient(
         `ws://localhost:8000/ws/team/${teamId}`,
         (frame) => {
-          // Process on the WS message callback — no setState, no re-render.
           const prevTs = prevFrameTsRef.current[teamId] ?? null;
-          if (prevTs === frame.timestamp) return; // deduplicate
+          if (prevTs === frame.timestamp) return;
           prevFrameTsRef.current[teamId] = frame.timestamp;
           const pts = expandSingleFrame(frame, prevTs);
           if (pts.length === 0) return;
@@ -311,11 +389,13 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
         null,
       );
       client.connect();
-      wsMap[teamId] = client;
+      wsMapRef.current[teamId] = client;
     }
+  }, [selectedTeamIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Flush buffered points to state at most once per second.
-    const flushInterval = setInterval(() => {
+  // Flush interval runs independently — does not restart when selection changes.
+  useEffect(() => {
+    function flush() {
       const pending = pendingPointsRef.current;
       if (Object.keys(pending).length === 0) return;
       pendingPointsRef.current = {};
@@ -328,47 +408,111 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
         }
         return next;
       });
-    }, 1000);
-
+    }
+    flushNowRef.current = flush;
+    const interval = setInterval(flush, 100);
     return () => {
-      clearInterval(flushInterval);
-      for (const client of Object.values(wsMap)) client.close();
+      clearInterval(interval);
+      for (const client of Object.values(wsMapRef.current)) client.close();
+      wsMapRef.current        = {};
       pendingPointsRef.current = {};
       prevFrameTsRef.current   = {};
     };
-  }, [teamIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only
 
-  // ── History data ──────────────────────────────────────────────────────────
+  // ── History data: fetch on demand per selected team, paginated ───────────
   const [historyDataByTeam, setHistoryDataByTeam] = useState({});
-  useEffect(() => {
-    if (!eventId || teams.length === 0) return;
-    Promise.all(
-      teams.map((t) =>
-        fetchTeamFrames(t.team_id, { eventId, limit: 10000 })
-          .then((frames) => ({ teamId: t.team_id, points: expandFrames(frames) }))
-          .catch(() => ({ teamId: t.team_id, points: [] })),
-      ),
-    ).then((results) => {
-      const map = {};
-      for (const { teamId, points } of results) map[teamId] = points;
-      setHistoryDataByTeam(map);
-    });
-  }, [eventId, teamIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fetchedHistoryRef   = useRef(new Set());
+  const historyHasMoreRef   = useRef({});
+  const historyLoadingRef   = useRef({});
+  const historyOldestTsRef  = useRef({});
 
-  // ── Active team info ──────────────────────────────────────────────────────
-  const [teamEcuInfo, setTeamEcuInfo] = useState(null);
   useEffect(() => {
-    if (activeTeamId == null) { setTeamEcuInfo(null); return; }
-    const ecu = ecuByTeamId[activeTeamId];
-    if (!ecu) { setTeamEcuInfo({ ecu: null, violations: [] }); return; }
-    fetchViolations(ecu.id, 50)
-      .then((violations) => setTeamEcuInfo({ ecu, violations }))
-      .catch(() => setTeamEcuInfo({ ecu, violations: [] }));
-  }, [activeTeamId, ecuByTeamId]);
+    if (!eventId) return;
+    for (const teamId of selectedTeamIds) {
+      if (fetchedHistoryRef.current.has(teamId)) continue;
+      fetchedHistoryRef.current.add(teamId);
+      historyHasMoreRef.current[teamId] = true;
+      const ecuId = ecuByTeamId[teamId]?.id;
+      if (!ecuId) {
+        setHistoryDataByTeam((prev) => ({ ...prev, [teamId]: [] }));
+        historyHasMoreRef.current[teamId] = false;
+        continue;
+      }
+      fetchEcuHistory(ecuId, { limit: 500, teamId })
+        .then((frames) => {
+          const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          setHistoryDataByTeam((prev) => ({ ...prev, [teamId]: expandFrames(sorted) }));
+          historyOldestTsRef.current[teamId] = sorted[0]?.timestamp ?? null;
+          if (frames.length < 500) historyHasMoreRef.current[teamId] = false;
+        })
+        .catch(() => {
+          setHistoryDataByTeam((prev) => ({ ...prev, [teamId]: [] }));
+          historyHasMoreRef.current[teamId] = false;
+        });
+    }
+  }, [selectedTeamIds, eventId, ecuByTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shared scroll sync across all three history charts.
+  const historyScrollElsRef = useRef([]);
+  const registerHistoryScrollEl = useCallback((el) => {
+    if (el && !historyScrollElsRef.current.includes(el)) {
+      historyScrollElsRef.current.push(el);
+    }
+  }, []);
+  const syncHistoryScroll = useCallback((scrollLeft) => {
+    for (const el of historyScrollElsRef.current) {
+      if (el.scrollLeft !== scrollLeft) el.scrollLeft = scrollLeft;
+    }
+  }, []);
+
+  const loadMoreHistory = useCallback(() => {
+    for (const teamId of selectedTeamIds) {
+      if (!historyHasMoreRef.current[teamId]) continue;
+      if (historyLoadingRef.current[teamId]) continue;
+      const before = historyOldestTsRef.current[teamId];
+      if (!before) continue;
+      const ecuId = ecuByTeamId[teamId]?.id;
+      if (!ecuId) continue;
+      historyLoadingRef.current[teamId] = true;
+      fetchEcuHistory(ecuId, { limit: 500, teamId, before })
+        .then((frames) => {
+          if (frames.length === 0) { historyHasMoreRef.current[teamId] = false; return; }
+          const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          setHistoryDataByTeam((prev) => ({
+            ...prev,
+            [teamId]: [...expandFrames(sorted), ...(prev[teamId] ?? [])],
+          }));
+          historyOldestTsRef.current[teamId] = sorted[0]?.timestamp ?? before;
+          if (frames.length < 500) historyHasMoreRef.current[teamId] = false;
+        })
+        .catch(() => {})
+        .finally(() => { historyLoadingRef.current[teamId] = false; });
+    }
+  }, [selectedTeamIds, ecuByTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Info panels for all selected teams ───────────────────────────────────
+  const [ecuInfoByTeamId, setEcuInfoByTeamId] = useState({});
+  const fetchedTeamIds = useRef(new Set());
+
+  useEffect(() => {
+    for (const teamId of selectedTeamIds) {
+      if (fetchedTeamIds.current.has(teamId)) continue;
+      fetchedTeamIds.current.add(teamId);
+      const ecu = ecuByTeamId[teamId];
+      if (!ecu) {
+        setEcuInfoByTeamId((p) => ({ ...p, [teamId]: { ecu: null, violations: [] } }));
+      } else {
+        fetchViolations(ecu.id, 50)
+          .then((violations) => setEcuInfoByTeamId((p) => ({ ...p, [teamId]: { ecu, violations } })))
+          .catch(() => setEcuInfoByTeamId((p) => ({ ...p, [teamId]: { ecu, violations: [] } })));
+      }
+    }
+  }, [selectedTeamIds, ecuByTeamId]);
 
   // ── Chip interaction ──────────────────────────────────────────────────────
   function handleChipClick(teamId) {
-    setActiveTeamId(teamId);
+    flushNowRef.current?.();
     setSelectedTeamIds((prev) => {
       const next = new Set(prev);
       if (next.has(teamId)) next.delete(teamId);
@@ -438,25 +582,24 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
       <div className="overview-filter-row">
         <button
           className="overview-filter-preset"
-          onClick={() => { setSelectedTeamIds(new Set(allTeamIds)); setActiveTeamId(null); }}
+          onClick={() => setSelectedTeamIds(new Set(allTeamIds))}
         >
           All
         </button>
         <button
           className="overview-filter-preset"
-          onClick={() => { setSelectedTeamIds(new Set()); setActiveTeamId(null); }}
+          onClick={() => setSelectedTeamIds(new Set())}
         >
           None
         </button>
         <div className="overview-chips">
           {teams.map((t) => {
             const inChart = selectedTeamIds.has(t.team_id);
-            const isActive = activeTeamId === t.team_id;
             return (
               <button
                 key={t.team_id}
-                className={`team-chip ${inChart ? "team-chip--selected" : ""} ${isActive ? "team-chip--active" : ""}`}
-                style={isActive ? { "--chip-color": teamColors[t.team_id] } : undefined}
+                className={`team-chip ${inChart ? "team-chip--selected" : ""}`}
+                style={{ "--chip-color": teamColors[t.team_id] }}
                 onClick={() => handleChipClick(t.team_id)}
               >
                 <span
@@ -480,6 +623,9 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="V"
+            onLoadMore={chartView === "history" ? loadMoreHistory : undefined}
+            onScrollSync={chartView === "history" ? syncHistoryScroll : undefined}
+            registerScrollEl={chartView === "history" ? registerHistoryScrollEl : undefined}
           />
         </div>
         <div className="chart-section">
@@ -490,6 +636,9 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="A"
+            onLoadMore={chartView === "history" ? loadMoreHistory : undefined}
+            onScrollSync={chartView === "history" ? syncHistoryScroll : undefined}
+            registerScrollEl={chartView === "history" ? registerHistoryScrollEl : undefined}
           />
         </div>
         <div className="chart-section">
@@ -500,79 +649,91 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="W"
+            onLoadMore={chartView === "history" ? loadMoreHistory : undefined}
+            onScrollSync={chartView === "history" ? syncHistoryScroll : undefined}
+            registerScrollEl={chartView === "history" ? registerHistoryScrollEl : undefined}
           />
         </div>
       </div>
 
-      {/* Team info panel */}
-      {activeTeamId != null && (
-        <div className="overview-info-panel">
-          <div className="overview-info-header">
-            <span
-              className="overview-info-team-dot"
-              style={{ background: teamColors[activeTeamId] }}
-            />
-            <h3 className="overview-info-team-name">{teamNames[activeTeamId]}</h3>
-          </div>
-
-          {teamEcuInfo == null ? (
-            <p className="overview-info-loading">Loading…</p>
-          ) : teamEcuInfo.ecu == null ? (
-            <p className="overview-info-loading">No ECU assigned to this team</p>
-          ) : (
-            <>
-              <div className="overview-info-cards">
-                {[
-                  ["ECU ID",         teamEcuInfo.ecu.id],
-                  ["MAC Address",    teamEcuInfo.ecu.mac_address ?? "—"],
-                  ["Vehicle Class",  teamEcuInfo.ecu.vehicle_class ?? "—"],
-                  ["Vehicle Type",   teamEcuInfo.ecu.vehicle_type ?? "—"],
-                  ["Team Number",    teamEcuInfo.ecu.team_number ?? "—"],
-                  ["Power Limit",
-                    teamEcuInfo.ecu.power_limit_watts != null
-                      ? `${teamEcuInfo.ecu.power_limit_watts} W`
-                      : "—"],
-                ].map(([label, value]) => (
-                  <div key={label} className="overview-info-card">
-                    <span className="overview-info-label">{label}</span>
-                    <span className={`overview-info-value${label === "MAC Address" ? " overview-info-mono" : ""}`}>
-                      {value}
-                    </span>
+      {/* Team info panels — one per selected team */}
+      {selectedTeamIds.size > 0 && (
+        <div className="overview-info-panels">
+          {teams
+            .filter((t) => selectedTeamIds.has(t.team_id))
+            .map((t) => {
+              const info = ecuInfoByTeamId[t.team_id];
+              return (
+                <div key={t.team_id} className="overview-info-panel">
+                  <div className="overview-info-header">
+                    <span
+                      className="overview-info-team-dot"
+                      style={{ background: teamColors[t.team_id] }}
+                    />
+                    <h3 className="overview-info-team-name">{t.team_name}</h3>
                   </div>
-                ))}
-              </div>
 
-              <div className="overview-violations">
-                <h4 className="overview-violations-title">
-                  Violations
-                  {teamEcuInfo.violations.length > 0 && (
-                    <span className="overview-violations-count">
-                      {teamEcuInfo.violations.length}
-                    </span>
-                  )}
-                </h4>
-                {teamEcuInfo.violations.length === 0 ? (
-                  <p className="overview-info-loading">No violations recorded</p>
-                ) : (
-                  <div className="overview-violations-list">
-                    {teamEcuInfo.violations.map((v, i) => (
-                      <div key={i} className="overview-violation-row">
-                        <span className="overview-violation-time">{fmtTs(v.started_at)}</span>
-                        <span className="overview-violation-power">
-                          {v.peak_power_watts != null
-                            ? `${v.peak_power_watts.toFixed(1)} W`
-                            : "—"}
-                        </span>
-                        <span className={`lb-status ${v.status === "ended" ? "lb-status--scored" : "lb-status--pending"}`}>
-                          {v.status ?? "open"}
-                        </span>
+                  {info == null ? (
+                    <p className="overview-info-loading">Loading…</p>
+                  ) : info.ecu == null ? (
+                    <p className="overview-info-loading">No ECU assigned to this team</p>
+                  ) : (
+                    <>
+                      <div className="overview-info-cards">
+                        {[
+                          ["ECU ID",        info.ecu.id],
+                          ["MAC Address",   info.ecu.mac_address ?? "—"],
+                          ["Vehicle Class", info.ecu.vehicle_class ?? "—"],
+                          ["Vehicle Type",  info.ecu.vehicle_type ?? "—"],
+                          ["Team Number",   info.ecu.team_number ?? "—"],
+                          ["Power Limit",
+                            info.ecu.power_limit_watts != null
+                              ? `${info.ecu.power_limit_watts} W`
+                              : "—"],
+                        ].map(([label, value]) => (
+                          <div key={label} className="overview-info-card">
+                            <span className="overview-info-label">{label}</span>
+                            <span className={`overview-info-value${label === "MAC Address" ? " overview-info-mono" : ""}`}>
+                              {value}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+
+                      <div className="overview-violations">
+                        <h4 className="overview-violations-title">
+                          Violations
+                          {info.violations.length > 0 && (
+                            <span className="overview-violations-count">
+                              {info.violations.length}
+                            </span>
+                          )}
+                        </h4>
+                        {info.violations.length === 0 ? (
+                          <p className="overview-info-loading">No violations recorded</p>
+                        ) : (
+                          <div className="overview-violations-list">
+                            {info.violations.map((v, i) => (
+                              <div key={i} className="overview-violation-row">
+                                <span className="overview-violation-time">{fmtTs(v.started_at)}</span>
+                                <span className="overview-violation-power">
+                                  {v.peak_power_watts != null
+                                    ? `${v.peak_power_watts.toFixed(1)} W`
+                                    : "—"}
+                                </span>
+                                <span className={`lb-status ${v.status === "ended" ? "lb-status--scored" : "lb-status--pending"}`}>
+                                  {v.status ?? "open"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
         </div>
       )}
     </div>

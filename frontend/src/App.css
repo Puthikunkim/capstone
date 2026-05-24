@@ -1711,20 +1711,23 @@ body {
   font-weight: 500;
   padding: 4px 12px 4px 8px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  opacity: 0.5;
 }
 .team-chip:hover {
-  background: var(--gray-dim);
+  opacity: 1;
+  background: color-mix(in srgb, var(--chip-color) 10%, transparent);
+  border-color: var(--chip-color, var(--border));
   color: var(--text-primary);
 }
 .team-chip--selected {
-  background: var(--gray-dim);
+  opacity: 1;
+  background: color-mix(in srgb, var(--chip-color) 15%, transparent);
   color: var(--text-primary);
-  border-color: var(--border-light);
+  border-color: var(--chip-color, var(--border-light));
 }
 .team-chip--active {
-  border-color: var(--chip-color, var(--accent));
-  box-shadow: 0 0 0 1px var(--chip-color, var(--accent));
+  box-shadow: 0 0 0 2px var(--chip-color, var(--accent));
 }
 
 .team-chip-dot {
@@ -1738,6 +1741,13 @@ body {
 .overview-charts {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+/* Team info panels grid */
+.overview-info-panels {
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 16px;
 }
 
