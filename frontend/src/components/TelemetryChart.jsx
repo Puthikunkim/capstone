@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import {
   LineChart,
   Line,
@@ -114,23 +114,33 @@ TelemetryChart.propTypes = {
 
 const PX_PER_POINT = 8;
 const MIN_CHART_WIDTH = 600;
+const OVERSCAN = 150; // extra points rendered on each side of the viewport
 
 export function HistoryChart({ data, dataKey, color, unit, label }) {
   const scrollRef = useRef(null);
   const isAtEnd = useRef(true);
+  const rafRef = useRef(null);
+  const [scrollLeft, setScrollLeft] = useState(0);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (isAtEnd.current) {
       el.scrollLeft = el.scrollWidth;
+      setScrollLeft(el.scrollLeft);
     }
   }, [data]);
+
+  useEffect(() => {
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, []);
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     isAtEnd.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => setScrollLeft(el.scrollLeft));
   };
 
   if (!data || data.length === 0) {
@@ -142,7 +152,18 @@ export function HistoryChart({ data, dataKey, color, unit, label }) {
     );
   }
 
-  const chartData = data.map((point) => ({
+  const totalWidth = Math.max(MIN_CHART_WIDTH, data.length * PX_PER_POINT);
+  const containerWidth = scrollRef.current?.clientWidth ?? 800;
+  const visibleCount = Math.ceil(containerWidth / PX_PER_POINT);
+
+  const startIdx = Math.max(0, Math.floor(scrollLeft / PX_PER_POINT) - OVERSCAN);
+  const endIdx = Math.min(data.length, startIdx + visibleCount + OVERSCAN * 2);
+  const windowedData = data.slice(startIdx, endIdx);
+
+  const windowOffset = startIdx * PX_PER_POINT;
+  const windowWidth = Math.max(MIN_CHART_WIDTH, windowedData.length * PX_PER_POINT);
+
+  const chartData = windowedData.map((point) => ({
     ...point,
     time: new Date(point.timestamp).toLocaleTimeString("en-AU", {
       hour: "2-digit",
@@ -152,11 +173,16 @@ export function HistoryChart({ data, dataKey, color, unit, label }) {
     }),
   }));
 
-  const chartWidth = Math.max(MIN_CHART_WIDTH, chartData.length * PX_PER_POINT);
-
-  const values = chartData.map((d) => d[dataKey]).filter((v) => v != null);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
+  // Compute domain from all data so the Y-axis stays stable while scrolling.
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+  for (const point of data) {
+    const v = point[dataKey];
+    if (v != null) {
+      if (v < minVal) minVal = v;
+      if (v > maxVal) maxVal = v;
+    }
+  }
   const pad = (maxVal - minVal) * 0.2 || 0.5;
   const domain = [
     parseFloat((minVal - pad).toFixed(2)),
@@ -164,49 +190,58 @@ export function HistoryChart({ data, dataKey, color, unit, label }) {
   ];
 
   return (
-    <div className="history-chart-scroll" data-testid="history-chart-scroll" ref={scrollRef} onScroll={handleScroll}>
-      <div style={{ width: chartWidth, minWidth: "100%" }}>
-        <LineChart
-          width={chartWidth}
-          height={200}
-          data={chartData}
-          margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
-        >
-          <CartesianGrid
-            strokeDasharray="3 3"
-            stroke={CHART_STYLE.cartesian.stroke}
-            vertical={false}
-          />
-          <XAxis
-            dataKey="time"
-            tick={CHART_STYLE.tick}
-            interval="preserveStartEnd"
-            minTickGap={60}
-            axisLine={false}
-            tickLine={false}
-          />
-          <YAxis
-            domain={domain}
-            tick={CHART_STYLE.tick}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={(v) => `${v.toFixed(1)}${unit}`}
-            width={52}
-          />
-          <Tooltip
-            contentStyle={CHART_STYLE.tooltip}
-            labelStyle={{ color: "#6b7a99", marginBottom: 4 }}
-            formatter={(value) => [`${value?.toFixed(2)} ${unit}`, label]}
-          />
-          <Line
-            type="monotone"
-            dataKey={dataKey}
-            stroke={color}
-            strokeWidth={2}
-            dot={false}
-            isAnimationActive={false}
-          />
-        </LineChart>
+    <div
+      className="history-chart-scroll"
+      data-testid="history-chart-scroll"
+      ref={scrollRef}
+      onScroll={handleScroll}
+      style={{ position: "relative" }}
+    >
+      {/* Full-width spacer keeps the scrollbar representing the entire dataset */}
+      <div style={{ width: totalWidth, height: 200, position: "relative" }}>
+        <div style={{ position: "absolute", left: windowOffset }}>
+          <LineChart
+            width={windowWidth}
+            height={200}
+            data={chartData}
+            margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke={CHART_STYLE.cartesian.stroke}
+              vertical={false}
+            />
+            <XAxis
+              dataKey="time"
+              tick={CHART_STYLE.tick}
+              interval="preserveStartEnd"
+              minTickGap={60}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              domain={domain}
+              tick={CHART_STYLE.tick}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => `${v.toFixed(1)}${unit}`}
+              width={52}
+            />
+            <Tooltip
+              contentStyle={CHART_STYLE.tooltip}
+              labelStyle={{ color: "#6b7a99", marginBottom: 4 }}
+              formatter={(value) => [`${value?.toFixed(2)} ${unit}`, label]}
+            />
+            <Line
+              type="monotone"
+              dataKey={dataKey}
+              stroke={color}
+              strokeWidth={2}
+              dot={false}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </div>
       </div>
     </div>
   );

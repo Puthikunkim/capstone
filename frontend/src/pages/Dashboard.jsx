@@ -378,12 +378,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           lastEnergyPointRef.current = expanded[expanded.length - 1] ?? null;
           setTotalEnergyWh(expanded.length > 0 ? energy : null);
           setHistoryPoints(expanded);
-          setChartData(expanded.slice(-200));
+          setChartData(expanded.slice(-1000));
         })
         .catch(() => {});
     } else {
-      // No timing: live chart seeds from last 100 ECU frames, history shows last 10 000 frames (~17 min at 10 fps)
-      const livePromise = fetchEcuHistory(selectedEcuId, { limit: 100, teamId });
+      // No timing: live chart seeds from last 1000 ECU frames, history shows last 10 000 frames (~17 min at 10 fps)
+      const livePromise = fetchEcuHistory(selectedEcuId, { limit: 1000, teamId });
       const historyPromise = fetchEcuHistory(selectedEcuId, { limit: 10000, teamId });
       Promise.all([livePromise, historyPromise])
         .then(([liveFrames, allFrames]) => {
@@ -396,7 +396,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           energyAccRef.current = energy;
           lastEnergyPointRef.current = expandedAll[expandedAll.length - 1] ?? null;
           setTotalEnergyWh(expandedAll.length > 0 ? energy : null);
-          setChartData(expandFrames(sortedLive).slice(-200));
+          setChartData(expandFrames(sortedLive).slice(-1000));
           setHistoryPoints(expandedAll);
         })
         .catch(() => {});
@@ -431,7 +431,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
 
     setChartData((prev) => {
       const next = [...prev, ...newPoints];
-      return next.length > 200 ? next.slice(-200) : next;
+      return next.length > 1000 ? next.slice(-1000) : next;
     });
     setHistoryPoints((prev) => {
       const next = [...prev, ...newPoints];
