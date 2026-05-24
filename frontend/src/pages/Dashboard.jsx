@@ -279,6 +279,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const energyAccRef = useRef(0);         // running energy total (Wh)
   const lastEnergyPointRef = useRef(null); // last sample point used in integration
   const [totalEnergyWh, setTotalEnergyWh] = useState(null);
+  const [lastFrameAvgCurrent, setLastFrameAvgCurrent] = useState(null);
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -372,6 +373,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       energyAccRef.current = 0;
       lastEnergyPointRef.current = null;
       setTotalEnergyWh(null);
+      setLastFrameAvgCurrent(null);
       setVoltageView("live");
       setCurrentView("live");
       setPowerView("live");
@@ -384,6 +386,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     energyAccRef.current = 0;
     lastEnergyPointRef.current = null;
     setTotalEnergyWh(null);
+    setLastFrameAvgCurrent(null);
     setVoltageView("live");
     setCurrentView("live");
     setPowerView("live");
@@ -403,6 +406,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           setTotalEnergyWh(expanded.length > 0 ? energy : null);
           setHistoryPoints(expanded);
           setChartData(expanded.slice(-1000));
+          const lastFrame = sorted[sorted.length - 1];
+          const samples = lastFrame?.current_samples;
+          if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
         })
         .catch(() => {});
     } else {
@@ -425,6 +431,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           setChartData(expandFrames(sortedLive).slice(-1000));
           setHistoryPoints(expandedHist);
           if (histFrames.length < 500) historyHasMoreRef.current = false;
+          const lastFrame = sortedLive[sortedLive.length - 1];
+          const samples = lastFrame?.current_samples;
+          if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
         })
         .catch(() => {});
     }
@@ -449,6 +458,8 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
+    const samples = liveData.current_samples;
+    if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
 
     // Integrate only the delta: [last known point, ...new points]
     const anchor = lastEnergyPointRef.current;
@@ -674,7 +685,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Current"
-          value={lastSample?.current?.toFixed(3)}
+          value={lastFrameAvgCurrent?.toFixed(3)}
           unit="A"
           sub={lastSample ? "Bi-directional" : "No data"}
           subStyle="sub-muted"
