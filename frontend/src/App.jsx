@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import PropTypes from "prop-types";
 
 const _EVENT_LABELS = {
   drag_race: "Drag Race",
@@ -62,6 +63,12 @@ function EventsPanel({ events, onSelectEvent }) {
     </div>
   );
 }
+
+EventsPanel.propTypes = {
+  events: PropTypes.array.isRequired,
+  onSelectEvent: PropTypes.func.isRequired,
+};
+
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { Navbar } from "./components/Navbar";
@@ -81,7 +88,6 @@ import {
 import { useViolationsWebSocket } from "./hooks/useWebSocket";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { AddTeamToCompetitionModal } from "./components/AddTeamToCompetitionModal";
-import { CompetitionTeamsPanel } from "./components/CompetitionTeamsPanel";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import "./App.css";
 

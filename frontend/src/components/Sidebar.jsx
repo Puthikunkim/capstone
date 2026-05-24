@@ -64,7 +64,6 @@ TeamCard.propTypes = {
 };
 
 export function Sidebar({
-  events,
   selectedEvent,
   onSelectEvent,
   teams,
@@ -214,7 +213,6 @@ export function Sidebar({
 }
 
 Sidebar.propTypes = {
-  events: PropTypes.array,
   selectedEvent: PropTypes.object,
   onSelectEvent: PropTypes.func.isRequired,
   teams: PropTypes.array,
