@@ -308,6 +308,7 @@ export default function App() {
             <LeaderboardPage
               eventId={selectedEvent.id}
               eventType={selectedEvent.event_type}
+              ecuList={ecuList}
             />
           ) : selectedTeam && !hasEcu ? (
             <div className="dashboard">

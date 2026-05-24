@@ -1561,3 +1561,212 @@ body {
 
 .lb-row--live { background: rgba(34,197,94,.04); }
 .lb-row--live:hover { background: rgba(34,197,94,.07); }
+
+/* ── All-Teams Overview ──────────────────────────────────────────────────── */
+.lb-overview-section {
+  margin-top: 32px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.lb-overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Team filter chip row */
+.overview-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overview-filter-preset {
+  background: var(--gray-dim);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.overview-filter-preset:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.overview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.team-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px 4px 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.team-chip:hover {
+  background: var(--gray-dim);
+  color: var(--text-primary);
+}
+.team-chip--selected {
+  background: var(--gray-dim);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+.team-chip--active {
+  border-color: var(--chip-color, var(--accent));
+  box-shadow: 0 0 0 1px var(--chip-color, var(--accent));
+}
+
+.team-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Charts stack */
+.overview-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Team info panel */
+.overview-info-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.overview-info-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.overview-info-team-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.overview-info-team-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.overview-info-loading {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.overview-info-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.overview-info-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.overview-info-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.overview-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.overview-info-mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* Violations sub-section */
+.overview-violations-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.overview-violations-count {
+  background: var(--red-dim);
+  color: var(--red);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+}
+
+.overview-violations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.overview-violation-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.overview-violation-time {
+  color: var(--text-secondary);
+  font-family: monospace;
+  min-width: 80px;
+}
+
+.overview-violation-power {
+  color: var(--red);
+  font-weight: 600;
+  min-width: 70px;
+}
