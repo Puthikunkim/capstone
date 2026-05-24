@@ -642,7 +642,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Current"
-          value={lastSample?.current?.toFixed(1)}
+          value={lastSample?.current?.toFixed(3)}
           unit="A"
           sub={lastSample ? "Bi-directional" : "No data"}
           subStyle="sub-muted"
