@@ -66,12 +66,12 @@ describe('CompetitionsPage — competition list', () => {
     );
   });
 
-  test('calls onSelectCompetition when Open Dashboard is clicked', async () => {
+  test('calls onSelectCompetition when Open Competition is clicked', async () => {
     fetchCompetitions.mockResolvedValue([COMP]);
     const onSelect = vi.fn();
     render(<CompetitionsPage onSelectCompetition={onSelect} />);
-    await waitFor(() => screen.getByText('Open Dashboard →'));
-    fireEvent.click(screen.getByText('Open Dashboard →'));
+    await waitFor(() => screen.getByText('Open Competition →'));
+    fireEvent.click(screen.getByText('Open Competition →'));
     expect(onSelect).toHaveBeenCalledWith(COMP);
   });
 });

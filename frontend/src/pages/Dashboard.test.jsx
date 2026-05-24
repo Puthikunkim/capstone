@@ -67,7 +67,8 @@ describe('Dashboard — ECU selected', () => {
     render(<Dashboard selectedEcuId={1} teamId={1} />);
     await waitFor(() => {
       expect(fetchEcu).toHaveBeenCalledWith(1);
-      expect(fetchEcuHistory).toHaveBeenCalledWith(1, { limit: 100, teamId: 1 });
+      expect(fetchEcuHistory).toHaveBeenCalledWith(1, expect.objectContaining({ limit: 1000, teamId: 1 }));
+      expect(fetchEcuHistory).toHaveBeenCalledWith(1, expect.objectContaining({ limit: 500, teamId: 1 }));
       expect(fetchViolations).toHaveBeenCalledWith(1);
     });
   });

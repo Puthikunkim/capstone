@@ -64,10 +64,10 @@ TeamCard.propTypes = {
 };
 
 export function Sidebar({
-  events,
   selectedEvent,
   onSelectEvent,
   teams,
+  competitionTeams,
   ecuList,
   selectedTeamId,
   selectedEcuId,
@@ -75,33 +75,64 @@ export function Sidebar({
   onSelectTeam,
   onUnassignEcu,
   onClearTeam,
+  onAddTeam,
+  onRemoveTeam,
 }) {
   const [query, setQuery] = useState("");
 
-  // ── Events list view ──────────────────────────────────────────────
+  // ── Teams list view (no event selected) ──────────────────────────
   if (!selectedEvent) {
     return (
       <aside className="sidebar">
-        <div className="sidebar-section-label">Events</div>
+        <div className="sidebar-section-label">
+          Teams
+          {onAddTeam && (
+            <button className="sidebar-add-btn" onClick={onAddTeam} title="Add team">
+              <svg viewBox="0 0 12 12" fill="none" width="10" height="10">
+                <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+        </div>
         <div className="sidebar-ecu-list">
-          {(events ?? []).length === 0 ? (
-            <div className="sidebar-empty">No events in this competition</div>
+          {(competitionTeams ?? []).length === 0 ? (
+            <div className="sidebar-empty">No teams yet</div>
           ) : (
-            (events ?? []).map((ev) => (
-              <div
-                key={ev.id}
-                className="sidebar-event-item"
-                onClick={() => onSelectEvent(ev)}
-              >
-                <svg viewBox="0 0 16 16" fill="none" width="14" height="14" className="sidebar-event-icon">
-                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" />
-                  <path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-                <span className="sidebar-event-label">
-                  {EVENT_LABELS[ev.event_type] ?? ev.event_type}
-                </span>
-              </div>
-            ))
+            (competitionTeams ?? []).map((team) => {
+              const ecu = ecuList.find((e) => e.team_id === team.id);
+              const status = ecu ? ecuStatus(ecu) : null;
+              const isViolating = ecu ? (violatingEcuIds ?? new Set()).has(ecu.id) : false;
+              const dotClass = isViolating ? "violation" : status;
+              return (
+                <div key={team.id} className="sidebar-team-card" style={{ cursor: "default" }}>
+                  <div className="team-card-top">
+                    <span className="team-card-name">{team.name}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {ecu && <div className={`ecu-dot ${dotClass}`} />}
+                      {onRemoveTeam && (
+                        <button
+                          className="ct-remove-btn"
+                          onClick={() => onRemoveTeam(team)}
+                          title="Remove from competition"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="team-card-meta">
+                    {team.vehicle_class} · {team.vehicle_type?.charAt(0).toUpperCase() + (team.vehicle_type?.slice(1) ?? "")}
+                  </div>
+                  {ecu ? (
+                    <div className="team-card-ecu">
+                      <span>{ecu.mac_address ?? "—"}</span>
+                    </div>
+                  ) : (
+                    <div className="team-card-no-ecu">No ECU assigned</div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
       </aside>
@@ -182,10 +213,10 @@ export function Sidebar({
 }
 
 Sidebar.propTypes = {
-  events: PropTypes.array,
   selectedEvent: PropTypes.object,
   onSelectEvent: PropTypes.func.isRequired,
   teams: PropTypes.array,
+  competitionTeams: PropTypes.array,
   ecuList: PropTypes.array.isRequired,
   selectedTeamId: PropTypes.number,
   selectedEcuId: PropTypes.number,
@@ -193,4 +224,6 @@ Sidebar.propTypes = {
   onSelectTeam: PropTypes.func.isRequired,
   onUnassignEcu: PropTypes.func,
   onClearTeam: PropTypes.func,
+  onAddTeam: PropTypes.func,
+  onRemoveTeam: PropTypes.func,
 };
