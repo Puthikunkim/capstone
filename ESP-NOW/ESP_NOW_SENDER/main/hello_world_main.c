@@ -25,7 +25,7 @@ static const char *TAG = "SENDER";
 #define GAIN                        1
 #define ADC_CURRENT_HIGH_CHANNEL    ADC_CHANNEL_4
 #define ADC_CURRENT_LOW_CHANNEL     ADC_CHANNEL_7
-#define CURRENT_RANGE_SWITCH_MV     1000
+#define CURRENT_RANGE_SWITCH_MV     3000
 #define ADC_VOLTAGE_CHANNEL         ADC_CHANNEL_6
 #define SAMPLES_PER_FRAME           10
 #define MAX_FRAMES_PER_PKT          3
@@ -586,15 +586,16 @@ void adc_task(void *arg) {
             last_sample_time = now;
             int raw_c_high, raw_c_low, raw_v, mv_c, mv_v;
             bool is_c_low;
-            ESP_ERROR_CHECK(adc_oneshot_read(
-                adc1_handle, ADC_CURRENT_HIGH_CHANNEL, &raw_c_high));
-            adc_cali_raw_to_voltage(adc1_cali_current_high, raw_c_high, &mv_c);
+            
             //is_c_low = false;
+            ESP_ERROR_CHECK(adc_oneshot_read(
+                adc1_handle, ADC_CURRENT_LOW_CHANNEL, &raw_c_low));
+            adc_cali_raw_to_voltage(adc1_cali_current_low, raw_c_low, &mv_c);
 
-            if (mv_c < CURRENT_RANGE_SWITCH_MV) {
+            if (mv_c > CURRENT_RANGE_SWITCH_MV) {
                 ESP_ERROR_CHECK(adc_oneshot_read(
-                    adc1_handle, ADC_CURRENT_LOW_CHANNEL, &raw_c_low));
-                adc_cali_raw_to_voltage(adc1_cali_current_low, raw_c_low, &mv_c);
+                    adc1_handle, ADC_CURRENT_HIGH_CHANNEL, &raw_c_high));
+                adc_cali_raw_to_voltage(adc1_cali_current_high, raw_c_high, &mv_c);
                 //is_c_low = true;
             }
 
@@ -645,16 +646,15 @@ void adc_task(void *arg) {
             ring_write++;
             xSemaphoreGive(ring_mutex);
 
-            bool low_activity = (mv_v < SLEEP_VOLTAGE_THRESH_MV && 
-                     mv_c < SLEEP_CURRENT_THRESH_MA);
-            int64_t now_ms = esp_timer_get_time() / 1000;
+            bool low_activity = (mv_v < SLEEP_VOLTAGE_THRESH_MV /*&& 
+                     mv_c < SLEEP_CURRENT_THRESH_MA*/);
 
             if (low_activity) {
                 if (!modem_sleeping) {
                     if (below_thresh_since == 0) {
-                        below_thresh_since = now_ms;
+                        below_thresh_since = now;
                     }
-                    else if ((now_ms - below_thresh_since) >= SLEEP_ENTRY_MS) {
+                    else if ((now - below_thresh_since) >= SLEEP_ENTRY_MS) {
                             modem_sleeping     = true;
                             below_thresh_since = 0;
                             esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
@@ -691,7 +691,7 @@ void sender_task(void *arg) {
         xSemaphoreTake(ring_mutex, portMAX_DELAY);
         while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
             uint16_t slot = ring_read % SAMPLE_RING_SIZE;
-            current_buf[sample_index] = sample_ring[slot].current_mv;
+            current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv*5.58 - 6860);
             voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv * 25 );
             now = sample_ring[slot].sampled_at;
             sample_index++;
@@ -743,9 +743,7 @@ void sender_task(void *arg) {
                     ESP_LOGW(TAG, "ACK timeout (%d/%d), bundling with next frame",
                              consecutive_timeouts, DISCONNECT_THRESHOLD);
                 }
-            }
-
-            if (!waiting_ack && registered) {
+            } else if (!waiting_ack && registered) {
                 adc_packet_t pkt;
                 memset(&pkt, 0, sizeof(pkt));
                 uint8_t count = build_packet(&pkt);
