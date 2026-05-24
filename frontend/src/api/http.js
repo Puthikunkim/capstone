@@ -16,10 +16,11 @@ export const fetchEcus = () => request("/ecu");
 
 export const fetchEcu = (ecuId) => request(`/ecu/${ecuId}`);
 
-export const fetchEcuHistory = (ecuId, { limit, teamId } = {}) => {
+export const fetchEcuHistory = (ecuId, { limit, teamId, before } = {}) => {
   const p = new URLSearchParams();
   if (limit != null) p.set("limit", limit);
   if (teamId != null) p.set("team_id", teamId);
+  if (before != null) p.set("before", before);
   const qs = p.toString();
   return request(`/ecu/${ecuId}/history${qs ? `?${qs}` : ""}`);
 };
@@ -60,6 +61,9 @@ export const unassignEcuFromTeam = (teamId, ecuId) =>
 
 export const addTeamToCompetition = (competitionId, teamId) =>
   request(`/competitions/${competitionId}/teams/${teamId}`, { method: "POST" });
+
+export const removeTeamFromCompetition = (competitionId, teamId) =>
+  request(`/competitions/${competitionId}/teams/${teamId}`, { method: "DELETE" });
 
 // ── Event Participants ────────────────────────────────────────────────
 export const fetchEventParticipants = (eventId) =>

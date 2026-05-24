@@ -30,7 +30,7 @@ from pydantic import ValidationError
 from app.database import SessionLocal
 from app.schemas.energy_frame import EnergyFrameIngest
 from app.services.ingest import persist_and_broadcast_frame
-from app.services.processing import compute_power_samples, convert_current_samples, convert_voltage_samples
+from app.services.processing import compute_power_samples
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -130,8 +130,8 @@ def parse_packet(line: str) -> dict | None:
         frames.append({
             "counter":    f.get("counter", 0),
             "tx_time_ms": f.get("tx_time_ms", ""),
-            "current":    f.get("current", []),
-            "voltage":    f.get("voltage", []),
+            "current":    [c / 1000 for c in f.get("current", [])],
+            "voltage":    [v / 1000 for v in f.get("voltage", [])],
         })
 
     return {
@@ -174,14 +174,12 @@ async def process_frames(queue: asyncio.Queue) -> None:
                 )
                 continue
 
-            v_samples = convert_voltage_samples(ingest.voltage_samples)
-            i_samples = convert_current_samples(ingest.current_samples)
             processed = {
                 "mac_address":     ingest.mac_address,
                 "timestamp":       ingest.timestamp,
-                "voltage_samples": v_samples,
-                "current_samples": i_samples,
-                "power_samples":   compute_power_samples(v_samples, i_samples),
+                "voltage_samples": ingest.voltage_samples,
+                "current_samples": ingest.current_samples,
+                "power_samples":   compute_power_samples(ingest.voltage_samples, ingest.current_samples),
             }
 
             db = SessionLocal()
@@ -250,7 +248,7 @@ def _serial_thread(port: str, baud: int, out: queue.Queue) -> None:
                         ser.flush()
                         logger.info("Time sync sent: %s", ts)
                     else:
-                        logger.info("RX non-JSON: %r", line[:120])
+                        logger.debug("RX non-JSON: %r", line[:120])
                     continue
                 packet = parse_packet(line)
                 if packet is None:

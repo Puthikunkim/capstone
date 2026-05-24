@@ -63,24 +63,21 @@ describe('Sidebar — team mode', () => {
   });
 });
 
-describe('Sidebar — events mode', () => {
-  test('renders event items when no event is selected', () => {
-    const events = [{ id: 1, event_type: 'drag_race' }, { id: 2, event_type: 'gymkhana' }];
-    render(<Sidebar events={events} selectedEvent={null} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
-    expect(screen.getByText('Drag Race')).toBeInTheDocument();
-    expect(screen.getByText('Gymkhana')).toBeInTheDocument();
+describe('Sidebar — no event selected', () => {
+  test('renders competition teams when no event is selected', () => {
+    render(<Sidebar selectedEvent={null} onSelectEvent={noop} teams={TEAMS} competitionTeams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
+    expect(screen.getByText('Team Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Team Beta')).toBeInTheDocument();
   });
 
-  test('shows empty state when no events exist', () => {
-    render(<Sidebar events={[]} selectedEvent={null} onSelectEvent={noop} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
-    expect(screen.getByText('No events in this competition')).toBeInTheDocument();
+  test('shows empty state when no competition teams exist', () => {
+    render(<Sidebar selectedEvent={null} onSelectEvent={noop} teams={[]} competitionTeams={[]} ecuList={[]} onSelectTeam={noop} />);
+    expect(screen.getByText('No teams yet')).toBeInTheDocument();
   });
 
-  test('calls onSelectEvent when an event is clicked', () => {
-    const onSelectEvent = vi.fn();
-    const events = [{ id: 1, event_type: 'drag_race' }];
-    render(<Sidebar events={events} selectedEvent={null} onSelectEvent={onSelectEvent} teams={TEAMS} ecuList={ECUS} onSelectTeam={noop} />);
-    fireEvent.click(screen.getByText('Drag Race'));
-    expect(onSelectEvent).toHaveBeenCalledWith(events[0]);
+  test('shows add button when onAddTeam is provided', () => {
+    const onAddTeam = vi.fn();
+    render(<Sidebar selectedEvent={null} onSelectEvent={noop} teams={TEAMS} competitionTeams={TEAMS} ecuList={ECUS} onSelectTeam={noop} onAddTeam={onAddTeam} />);
+    expect(screen.getByTitle('Add team')).toBeInTheDocument();
   });
 });

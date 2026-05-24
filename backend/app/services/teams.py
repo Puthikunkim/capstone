@@ -27,6 +27,10 @@ class TeamInDifferentCompetitionError(ValueError):
     pass
 
 
+class TeamNotInCompetitionError(ValueError):
+    pass
+
+
 def create_team(db: Session, payload: TeamCreate) -> Team:
     normalized_name = payload.name.strip()
 
@@ -78,6 +82,25 @@ def add_team_to_competition(db: Session, team: Team, competition_id: int) -> Tea
     except Exception:
         db.rollback()
         raise
+    db.refresh(team)
+    return team
+
+
+def remove_team_from_competition(db: Session, team: Team, competition_id: int) -> Team:
+    if team.competition_id != competition_id:
+        raise TeamNotInCompetitionError(f"Team '{team.name}' is not in this competition")
+    team.competition_id = None
+    participants = db.scalars(
+        select(EventParticipant)
+        .join(CompetitionEvent, EventParticipant.event_id == CompetitionEvent.id)
+        .where(
+            EventParticipant.team_id == team.id,
+            CompetitionEvent.competition_id == competition_id,
+        )
+    ).all()
+    for p in participants:
+        db.delete(p)
+    db.commit()
     db.refresh(team)
     return team
 

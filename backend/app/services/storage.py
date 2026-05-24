@@ -135,7 +135,7 @@ def save_frame(db: Session, frame_data: Any) -> tuple[EnergyFrame, bool]:
 			"vehicle_class": payload.get("vehicle_class"),
 			"vehicle_type": payload.get("vehicle_type"),
 			"power_limit_watts": payload.get("power_limit_watts"),
-			"last_seen": payload.get("timestamp"),
+			"last_seen": datetime.now(timezone.utc),
 			"temperature": payload.get("temperature"),
 			"flash_usage": payload.get("flash_usage"),
 			"firmware_version": payload.get("firmware_version"),
@@ -176,6 +176,7 @@ def get_frames(
 	ecu_id: int,
 	start: datetime | None = None,
 	end: datetime | None = None,
+	before: datetime | None = None,
 	limit: int | None = 100,
 	team_id: int | None = None,
 ) -> list[EnergyFrame]:
@@ -189,6 +190,16 @@ def get_frames(
 		stmt = stmt.where(EnergyFrame.timestamp >= _to_utc(start))
 	if end is not None:
 		stmt = stmt.where(EnergyFrame.timestamp <= _to_utc(end))
+
+	if before is not None:
+		# Fetch the N most recent frames strictly before `before`, returned in chronological order.
+		stmt = stmt.where(EnergyFrame.timestamp < _to_utc(before))
+		stmt = stmt.order_by(EnergyFrame.timestamp.desc())
+		if limit is not None:
+			stmt = stmt.limit(max(0, limit))
+		frames = list(db.scalars(stmt).all())
+		frames.reverse()
+		return frames
 
 	stmt = stmt.order_by(EnergyFrame.timestamp.asc())
 	if limit is not None:

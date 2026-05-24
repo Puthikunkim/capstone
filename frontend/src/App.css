@@ -648,6 +648,10 @@ body {
 }
 
 .competitions-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 32px;
 }
 .competitions-heading h1 {
@@ -1285,6 +1289,23 @@ body {
   gap: 8px;
 }
 
+.ct-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+}
+.ct-remove-btn:hover {
+  opacity: 1;
+  color: var(--danger, #e05252);
+}
+
 .ct-team-name {
   font-size: 14px;
   font-weight: 700;
@@ -1312,6 +1333,75 @@ body {
   color: var(--text-muted);
   font-style: italic;
   margin-top: 2px;
+}
+
+/* ── Events panel (competition dashboard, no event selected) ─────── */
+.events-panel {
+  flex: 1;
+  padding: 48px 40px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.events-panel-header h2 {
+  font-size: 24px; font-weight: 700; color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.events-panel-header p { font-size: 14px; color: var(--text-secondary); }
+
+.events-panel-empty {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; color: var(--text-muted); text-align: center; padding: 80px 20px;
+}
+.events-panel-empty p { font-size: 15px; color: var(--text-secondary); }
+
+.events-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.event-panel-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 24px;
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+  user-select: none;
+}
+.event-panel-card:hover {
+  border-color: var(--accent-glow);
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 8px 24px rgba(0,0,0,0.3);
+  transform: translateY(-2px);
+}
+
+.event-panel-icon-wrap {
+  width: 52px; height: 52px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-glow);
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.event-panel-name {
+  font-size: 20px; font-weight: 700; color: var(--text-primary);
+}
+
+.event-panel-desc {
+  font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+}
+
+.event-panel-cta {
+  font-size: 13px; font-weight: 600; color: var(--accent);
+  margin-top: 8px;
 }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
