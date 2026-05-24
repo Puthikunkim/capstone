@@ -91,22 +91,6 @@ function CompetitionDetailModal({ competition, allTeams, onClose, onOpen, onTeam
         </div>
 
         <div className="modal-body">
-          {/* Events */}
-          <div className="form-field">
-            <label>Event Types</label>
-            <div className="comp-detail-events">
-              {competition.events.map((ev) => (
-                <div key={ev.id} className="comp-detail-event-row">
-                  <span className="comp-detail-event-icon">{EVENT_ICONS[ev.event_type]}</span>
-                  <span className="comp-detail-event-name">{EVENT_LABELS[ev.event_type] ?? ev.event_type}</span>
-                </div>
-              ))}
-              {competition.events.length === 0 && (
-                <span className="comp-event-badge muted">No events configured</span>
-              )}
-            </div>
-          </div>
-
           {/* Teams list */}
           <div className="form-field">
             <div className="comp-detail-teams-header">
@@ -142,6 +126,22 @@ function CompetitionDetailModal({ competition, allTeams, onClose, onOpen, onTeam
             ) : (
               <p className="comp-detail-no-teams">No teams in this competition yet.</p>
             )}
+          </div>
+
+          {/* Events */}
+          <div className="form-field">
+            <label>Event Types</label>
+            <div className="comp-detail-events">
+              {competition.events.map((ev) => (
+                <div key={ev.id} className="comp-detail-event-row">
+                  <span className="comp-detail-event-icon">{EVENT_ICONS[ev.event_type]}</span>
+                  <span className="comp-detail-event-name">{EVENT_LABELS[ev.event_type] ?? ev.event_type}</span>
+                </div>
+              ))}
+              {competition.events.length === 0 && (
+                <span className="comp-event-badge muted">No events configured</span>
+              )}
+            </div>
           </div>
 
           {/* Add teams inline */}
@@ -206,7 +206,7 @@ function CompetitionDetailModal({ competition, allTeams, onClose, onOpen, onTeam
             className="btn-primary"
             onClick={() => { onClose(); onOpen(); }}
           >
-            Open Dashboard →
+            Open Competition →
           </button>
         </div>
       </div>
@@ -249,7 +249,7 @@ function CompetitionCard({ competition, onSelect, onViewDetail }) {
           View Details
         </button>
         <span className="competition-card-enter" onClick={onSelect}>
-          Open Dashboard →
+          Open Competition →
         </span>
       </div>
     </div>

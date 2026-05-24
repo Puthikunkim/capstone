@@ -686,7 +686,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               <path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           }
-          label="Power"
+          label="Power Consumption"
           value={
             lastSample?.voltage != null && lastSample?.current != null
               ? (lastSample.voltage * lastSample.current).toFixed(2)
@@ -810,7 +810,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
 
         <div className="chart-section">
           <div className="chart-section-header">
-            <h3>Power</h3>
+            <h3>Power Consumption</h3>
             <div className="chart-view-toggle">
               <button
                 className={`chart-view-btn ${powerView === "live" ? "active" : ""}`}
