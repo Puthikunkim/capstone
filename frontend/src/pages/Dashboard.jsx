@@ -267,7 +267,9 @@ EventTimingCard.propTypes = {
 export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCreateTeam, onUnassign, participant, onSaveParticipant }) {
   const [ecuData, setEcuData] = useState(null);
   const [chartData, setChartData] = useState([]);      // live sample points (capped)
-  const [historyPoints, setHistoryPoints] = useState([]); // all historical sample points
+  const [historyPoints, setHistoryPoints] = useState([]);
+  const historyHasMoreRef = useRef(true);
+  const historyLoadingRef = useRef(false);
   const [violations, setViolations] = useState([]);
   const [monitoring, setMonitoring] = useState(true);
   const [voltageView, setVoltageView] = useState("live");
@@ -297,11 +299,33 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const [firmwareError, setFirmwareError] = useState(null);
   const firmwareInputRef = useRef(null);
 
+  // Mirror historyPoints[0].timestamp in a ref so loadMoreHistory stays stable.
+  const historyOldestTsRef = useRef(null);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (!historyHasMoreRef.current || historyLoadingRef.current || !selectedEcuId || !historyOldestTsRef.current) return;
+    historyLoadingRef.current = true;
+    try {
+      const frames = await fetchEcuHistory(selectedEcuId, { limit: 500, teamId, before: historyOldestTsRef.current });
+      if (frames.length === 0) { historyHasMoreRef.current = false; return; }
+      const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      setHistoryPoints((current) => [...expandFrames(sorted), ...current]);
+      if (frames.length < 500) historyHasMoreRef.current = false;
+    } catch {
+      // ignore fetch errors
+    } finally {
+      historyLoadingRef.current = false;
+    }
+  }, [selectedEcuId, teamId]);
+
   const activeTeamId = monitoring ? teamId : null;
   const { isConnected, liveData } = useTeamWebSocket(activeTeamId);
+  const lastLiveDataTs = useRef(null);
   // ecuData.is_connected reflects whether the physical ECU is sending frames (last_seen within 10s).
   // isConnected only tells us the WebSocket to the backend is open — always true while backend runs.
-  const ecuIsConnected = ecuData?.is_connected ?? false;
+  // Also treat as connected if a live frame arrived in the last 15 s, so a stale poll can't flip the dot red.
+  const ecuIsConnected = (ecuData?.is_connected ?? false) ||
+    (lastLiveDataTs.current != null && Date.now() - lastLiveDataTs.current < 15_000);
 
   // Fetch ECU config + violations when the selected ECU changes
   useEffect(() => {
@@ -382,22 +406,25 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
         })
         .catch(() => {});
     } else {
-      // No timing: live chart seeds from last 1000 ECU frames, history shows last 10 000 frames (~17 min at 10 fps)
-      const livePromise = fetchEcuHistory(selectedEcuId, { limit: 1000, teamId });
-      const historyPromise = fetchEcuHistory(selectedEcuId, { limit: 10000, teamId });
+      // Seed live chart from last 1000 frames; seed history from last 500 frames (more loaded on demand as user scrolls).
+      const now = new Date().toISOString();
+      const livePromise = fetchEcuHistory(selectedEcuId, { limit: 1000, teamId, before: now });
+      const historyPromise = fetchEcuHistory(selectedEcuId, { limit: 500, teamId, before: now });
+      historyHasMoreRef.current = true;
       Promise.all([livePromise, historyPromise])
-        .then(([liveFrames, allFrames]) => {
+        .then(([liveFrames, histFrames]) => {
           const sortFn = (a, b) => new Date(a.timestamp) - new Date(b.timestamp);
           const sortedLive = [...liveFrames].sort(sortFn);
-          const sortedAll = [...allFrames].sort(sortFn);
+          const sortedHist = [...histFrames].sort(sortFn);
           if (sortedLive.length > 0) lastFrameTsRef.current = sortedLive[sortedLive.length - 1].timestamp;
-          const expandedAll = expandFrames(sortedAll);
-          const energy = integratePointsWh(expandedAll);
+          const expandedHist = expandFrames(sortedHist);
+          const energy = integratePointsWh(expandedHist);
           energyAccRef.current = energy;
-          lastEnergyPointRef.current = expandedAll[expandedAll.length - 1] ?? null;
-          setTotalEnergyWh(expandedAll.length > 0 ? energy : null);
+          lastEnergyPointRef.current = expandedHist[expandedHist.length - 1] ?? null;
+          setTotalEnergyWh(expandedHist.length > 0 ? energy : null);
           setChartData(expandFrames(sortedLive).slice(-1000));
-          setHistoryPoints(expandedAll);
+          setHistoryPoints(expandedHist);
+          if (histFrames.length < 500) historyHasMoreRef.current = false;
         })
         .catch(() => {});
     }
@@ -418,6 +445,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   // accumulate energy incrementally — O(samples-per-frame) instead of O(all history).
   useEffect(() => {
     if (!liveData) return;
+    lastLiveDataTs.current = Date.now();
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
@@ -438,6 +466,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       return next.length > 100000 ? next.slice(-100000) : next;
     });
   }, [liveData]);
+
+  useEffect(() => {
+    historyOldestTsRef.current = historyPoints[0]?.timestamp ?? null;
+  }, [historyPoints]);
 
   // ── Config form ──────────────────────────────────────────────────
 
@@ -629,7 +661,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Voltage"
-          value={lastSample?.voltage?.toFixed(1)}
+          value={lastSample?.voltage?.toFixed(2)}
           unit="V"
           sub={lastSample ? <><span className="stable-dot" /> Stable</> : "No data"}
           subStyle={lastSample ? "sub-stable" : "sub-muted"}
@@ -657,7 +689,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           label="Power"
           value={
             lastSample?.voltage != null && lastSample?.current != null
-              ? (lastSample.voltage * lastSample.current).toFixed(1)
+              ? (lastSample.voltage * lastSample.current).toFixed(2)
               : null
           }
           unit="W"
@@ -726,6 +758,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               color="#00c6ff"
               unit="V"
               label="Voltage"
+              onLoadMore={loadMoreHistory}
             />
           )}
         </div>
@@ -770,6 +803,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               color="#f59e0b"
               unit="A"
               label="Current"
+              onLoadMore={loadMoreHistory}
             />
           )}
         </div>
@@ -814,6 +848,7 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
               color="#10b981"
               unit="W"
               label="Power"
+              onLoadMore={loadMoreHistory}
             />
           )}
         </div>

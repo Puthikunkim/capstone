@@ -59,8 +59,8 @@ export function TelemetryChart({ data, dataKey, color, unit, label }) {
   const maxVal = Math.max(...values);
   const pad = (maxVal - minVal) * 0.2 || 0.5;
   const domain = [
-    parseFloat((minVal - pad).toFixed(2)),
-    parseFloat((maxVal + pad).toFixed(2)),
+    Number.parseFloat((minVal - pad).toFixed(2)),
+    Number.parseFloat((maxVal + pad).toFixed(2)),
   ];
 
   return (
@@ -116,19 +116,33 @@ const PX_PER_POINT = 8;
 const MIN_CHART_WIDTH = 600;
 const OVERSCAN = 150; // extra points rendered on each side of the viewport
 
-export function HistoryChart({ data, dataKey, color, unit, label }) {
+export function HistoryChart({ data, dataKey, color, unit, label, onLoadMore }) {
   const scrollRef = useRef(null);
   const isAtEnd = useRef(true);
   const rafRef = useRef(null);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const prevDataLengthRef = useRef(0);
+  const prevFirstTsRef = useRef(null);
+  const loadingMoreRef = useRef(false);
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    if (isAtEnd.current) {
+    if (!el || !data.length) return;
+
+    const firstTs = data[0]?.timestamp;
+    if (prevFirstTsRef.current && firstTs !== prevFirstTsRef.current) {
+      // Data was prepended — shift scroll right so the visible window stays the same.
+      const addedCount = data.length - prevDataLengthRef.current;
+      el.scrollLeft += addedCount * PX_PER_POINT;
+      setScrollLeft(el.scrollLeft);
+      loadingMoreRef.current = false;
+    } else if (isAtEnd.current) {
       el.scrollLeft = el.scrollWidth;
       setScrollLeft(el.scrollLeft);
     }
+
+    prevFirstTsRef.current = firstTs;
+    prevDataLengthRef.current = data.length;
   }, [data]);
 
   useEffect(() => {
@@ -139,6 +153,12 @@ export function HistoryChart({ data, dataKey, color, unit, label }) {
     const el = scrollRef.current;
     if (!el) return;
     isAtEnd.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
+
+    if (el.scrollLeft < 300 && onLoadMore && !loadingMoreRef.current) {
+      loadingMoreRef.current = true;
+      onLoadMore();
+    }
+
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => setScrollLeft(el.scrollLeft));
   };
@@ -185,8 +205,8 @@ export function HistoryChart({ data, dataKey, color, unit, label }) {
   }
   const pad = (maxVal - minVal) * 0.2 || 0.5;
   const domain = [
-    parseFloat((minVal - pad).toFixed(2)),
-    parseFloat((maxVal + pad).toFixed(2)),
+    Number.parseFloat((minVal - pad).toFixed(2)),
+    Number.parseFloat((maxVal + pad).toFixed(2)),
   ];
 
   return (
@@ -253,4 +273,5 @@ HistoryChart.propTypes = {
   color: PropTypes.string.isRequired,
   unit: PropTypes.string.isRequired,
   label: PropTypes.string.isRequired,
+  onLoadMore: PropTypes.func,
 };
