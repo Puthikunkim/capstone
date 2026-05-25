@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import PropTypes from "prop-types";
 import {
   LineChart,
@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import WebSocketClient from "../api/websocket";
-import { fetchEcuHistory, fetchViolations } from "../api/http";
+import { fetchTeamFrames, fetchViolations } from "../api/http";
 
 const TEAM_COLORS = [
   "#00c6ff", "#f59e0b", "#a78bfa", "#f87171", "#34d399",
@@ -55,7 +55,7 @@ const teamKey = (teamId) => `t_${teamId}`;
 // ── Merge per-team data into a single Recharts-compatible array ───────────────
 // Live: index-aligned using each team's last maxPts points.
 // Avoids server/browser clock-skew by never comparing server timestamps to Date.now().
-function mergeForLiveChart(chartDataByTeam, selectedTeamIds, dataKey, maxPts = 100) {
+function mergeForLiveChart(chartDataByTeam, selectedTeamIds, dataKey, maxPts = 200) {
   if (selectedTeamIds.length === 0) return [];
 
   // Slice each team to the last maxPts points and find the overall newest timestamp.
@@ -120,7 +120,7 @@ function mergeForHistoryChart(historyDataByTeam, selectedTeamIds, dataKey) {
     const label = new Date(t).toLocaleTimeString([], {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
-    const entry = { timeLabel: label, _ts: t };
+    const entry = { timeLabel: label };
     for (const teamId of selectedTeamIds) {
       const pts = historyDataByTeam[teamId] ?? [];
       let bestDiff = Infinity;
@@ -142,36 +142,7 @@ const TOOLTIP_CONTENT_STYLE = {
   borderRadius: 8, fontSize: 12,
 };
 
-const PX_PER_POINT = 8;
-
-function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit, onLoadMore, onScrollSync, registerScrollEl }) {
-  const scrollRef        = useRef(null);
-  const isAtEndRef       = useRef(true);
-  const loadingMoreRef   = useRef(false);
-  const prevLengthRef    = useRef(0);
-  const prevFirstTsRef   = useRef(null);
-
-  useEffect(() => {
-    if (registerScrollEl && scrollRef.current) registerScrollEl(scrollRef.current);
-  }, [registerScrollEl]);
-
-  // When history data is prepended, shift scroll right to keep the viewed window stable.
-  useEffect(() => {
-    if (!onLoadMore) return;
-    const el = scrollRef.current;
-    if (!el || !mergedData.length) return;
-    const firstTs = mergedData[0]?._ts ?? null;
-    if (prevFirstTsRef.current !== null && firstTs !== prevFirstTsRef.current) {
-      const added = mergedData.length - prevLengthRef.current;
-      el.scrollLeft += added * PX_PER_POINT;
-      loadingMoreRef.current = false;
-    } else if (isAtEndRef.current) {
-      el.scrollLeft = el.scrollWidth;
-    }
-    prevFirstTsRef.current = firstTs;
-    prevLengthRef.current  = mergedData.length;
-  }, [mergedData, onLoadMore]);
-
+function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit }) {
   if (selectedTeamIds.length === 0) {
     return (
       <div className="chart-empty">
@@ -194,102 +165,64 @@ function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, un
   );
   const min = allVals.length ? Math.min(...allVals) : 0;
   const max = allVals.length ? Math.max(...allVals) : 1;
-  const pad = (max - min) * 0.2 || 1;
+  const spread = Math.max(max - min, 1);
+  // Keep the axis tight but add a small fixed margin so lines have breathing room.
+  const pad = spread * 0.3;
   const domain = [
     parseFloat((min - pad).toFixed(2)),
     parseFloat((max + pad).toFixed(2)),
   ];
 
-  const lines = selectedTeamIds.map((teamId) => (
-    <Line
-      key={teamId}
-      type="monotone"
-      dataKey={teamKey(teamId)}
-      stroke={teamColors[teamId]}
-      dot={false}
-      isAnimationActive={false}
-      strokeWidth={1.5}
-      connectNulls={false}
-    />
-  ));
-
-  const axes = (
-    <>
-      <XAxis
-        dataKey="timeLabel"
-        tick={{ fill: "#6b7a99", fontSize: 11 }}
-        axisLine={{ stroke: "#1e2a3a" }}
-        tickLine={false}
-        interval="preserveStartEnd"
-        minTickGap={60}
-      />
-      <YAxis
-        domain={domain}
-        unit={unit}
-        tick={{ fill: "#6b7a99", fontSize: 11 }}
-        axisLine={false}
-        tickLine={false}
-        width={52}
-      />
-      <Tooltip
-        contentStyle={TOOLTIP_CONTENT_STYLE}
-        labelStyle={{ color: "#e8edf5" }}
-        itemStyle={{ color: "#e8edf5" }}
-        formatter={(v, name) => {
-          const teamId = Number(name.replace("t_", ""));
-          return [
-            v != null ? `${Number(v).toFixed(2)} ${unit}` : "—",
-            teamNames[teamId] ?? name,
-          ];
-        }}
-      />
-      <Legend
-        formatter={(name) => {
-          const teamId = Number(name.replace("t_", ""));
-          return teamNames[teamId] ?? name;
-        }}
-        wrapperStyle={{ fontSize: 12, color: "#6b7a99" }}
-      />
-    </>
-  );
-
-  if (onLoadMore) {
-    const totalWidth = Math.max(600, mergedData.length * PX_PER_POINT);
-    const handleScroll = (e) => {
-      const el = e.currentTarget;
-      isAtEndRef.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
-      if (el.scrollLeft < 300 && !loadingMoreRef.current) {
-        loadingMoreRef.current = true;
-        onLoadMore();
-      }
-      onScrollSync?.(el.scrollLeft);
-    };
-    return (
-      <div
-        ref={scrollRef}
-        className="history-chart-scroll"
-        onScroll={handleScroll}
-      >
-        <div style={{ width: totalWidth, height: 220 }}>
-          <LineChart
-            width={totalWidth}
-            height={220}
-            data={mergedData}
-            margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-          >
-            {axes}
-            {lines}
-          </LineChart>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <ResponsiveContainer width="100%" height={220}>
       <LineChart data={mergedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        {axes}
-        {lines}
+        <XAxis
+          dataKey="timeLabel"
+          tick={{ fill: "#6b7a99", fontSize: 11 }}
+          axisLine={{ stroke: "#1e2a3a" }}
+          tickLine={false}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          domain={domain}
+          unit={unit}
+          tick={{ fill: "#6b7a99", fontSize: 11 }}
+          axisLine={false}
+          tickLine={false}
+          width={52}
+        />
+        <Tooltip
+          contentStyle={TOOLTIP_CONTENT_STYLE}
+          labelStyle={{ color: "#e8edf5" }}
+          itemStyle={{ color: "#e8edf5" }}
+          formatter={(v, name) => {
+            // name is the dataKey string "t_123"; strip prefix to get teamId
+            const teamId = Number(name.replace("t_", ""));
+            return [
+              v != null ? `${Number(v).toFixed(2)} ${unit}` : "—",
+              teamNames[teamId] ?? name,
+            ];
+          }}
+        />
+        <Legend
+          formatter={(name) => {
+            const teamId = Number(name.replace("t_", ""));
+            return teamNames[teamId] ?? name;
+          }}
+          wrapperStyle={{ fontSize: 12, color: "#6b7a99" }}
+        />
+        {selectedTeamIds.map((teamId) => (
+          <Line
+            key={teamId}
+            type="monotone"
+            dataKey={teamKey(teamId)}
+            stroke={teamColors[teamId]}
+            dot={false}
+            isAnimationActive={false}
+            strokeWidth={2}
+            connectNulls={false}
+          />
+        ))}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -313,14 +246,25 @@ function fmtTs(iso) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function AllTeamsOverview({ eventId, teams, ecuList }) {
+  // Sort teams by team_id so order is always stable regardless of how the
+  // leaderboard API returns them (rank changes every 5s would otherwise reshuffle chips).
+  const stableTeams = useMemo(
+    () => [...teams].sort((a, b) => a.team_id - b.team_id),
+    // We intentionally only re-sort when the SET of team IDs changes, not on every
+    // rank update. We stringify sorted IDs as a stable key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify([...teams].map((t) => t.team_id).sort((a, b) => a - b))],
+  );
+
   const teamColors = useMemo(() => {
     const map = {};
-    teams.forEach((t, i) => { map[t.team_id] = TEAM_COLORS[i % TEAM_COLORS.length]; });
+    stableTeams.forEach((t, i) => { map[t.team_id] = TEAM_COLORS[i % TEAM_COLORS.length]; });
     return map;
-  }, [teams]);
+  }, [stableTeams]);
 
   const teamNames = useMemo(() => {
     const map = {};
+    // Use live `teams` for names so renames propagate, but keys are stable.
     teams.forEach((t) => { map[t.team_id] = t.team_name; });
     return map;
   }, [teams]);
@@ -333,14 +277,15 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
     return map;
   }, [ecuList]);
 
-  const allTeamIds = useMemo(() => teams.map((t) => t.team_id), [teams]);
+  const allTeamIds = useMemo(() => stableTeams.map((t) => t.team_id), [stableTeams]);
   const teamIdsKey = useMemo(
-    () => JSON.stringify([...allTeamIds].sort((a, b) => a - b)),
+    () => JSON.stringify(allTeamIds),
     [allTeamIds],
   );
 
   // Filter / selection state.
   const [selectedTeamIds, setSelectedTeamIds] = useState(() => new Set(allTeamIds));
+  const [activeTeamId, setActiveTeamId]       = useState(null);
   const [chartView, setChartView]             = useState("live");
 
   // Sync filter when team list changes (new event or new participants).
@@ -348,37 +293,27 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
   useEffect(() => {
     if (prevTeamIdsKeyRef.current !== teamIdsKey) {
       prevTeamIdsKeyRef.current = teamIdsKey;
-      setSelectedTeamIds(new Set());
+      setSelectedTeamIds(new Set(allTeamIds));
+      setActiveTeamId(null);
     }
   });
 
-  // ── Live data: one WS per selected team, flush to state at 1 Hz ─────────
+  // ── Live data: buffer frames in a ref, flush to state at 1 Hz ────────────
+  // This prevents render storms when multiple teams are streaming concurrently.
   const [chartDataByTeam, setChartDataByTeam] = useState({});
-  const pendingPointsRef = useRef({});
-  const prevFrameTsRef   = useRef({});
-  const flushNowRef      = useRef(null);
-  const wsMapRef         = useRef({});
+  const pendingPointsRef    = useRef({});  // { teamId: point[] } accumulated since last flush
+  const prevFrameTsRef      = useRef({});  // { teamId: lastFrameTimestamp }
 
-  // Incrementally open/close connections as selection changes.
   useEffect(() => {
-    // Close connections for teams no longer selected.
-    for (const idStr of Object.keys(wsMapRef.current)) {
-      const id = Number(idStr);
-      if (!selectedTeamIds.has(id)) {
-        wsMapRef.current[idStr].close();
-        delete wsMapRef.current[idStr];
-        delete pendingPointsRef.current[id];
-        delete prevFrameTsRef.current[id];
-      }
-    }
-    // Open connections for newly selected teams.
-    for (const teamId of selectedTeamIds) {
-      if (wsMapRef.current[teamId]) continue;
+    const wsMap = {};
+
+    for (const teamId of allTeamIds) {
       const client = new WebSocketClient(
         `ws://localhost:8000/ws/team/${teamId}`,
         (frame) => {
+          // Process on the WS message callback — no setState, no re-render.
           const prevTs = prevFrameTsRef.current[teamId] ?? null;
-          if (prevTs === frame.timestamp) return;
+          if (prevTs === frame.timestamp) return; // deduplicate
           prevFrameTsRef.current[teamId] = frame.timestamp;
           const pts = expandSingleFrame(frame, prevTs);
           if (pts.length === 0) return;
@@ -389,13 +324,11 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
         null,
       );
       client.connect();
-      wsMapRef.current[teamId] = client;
+      wsMap[teamId] = client;
     }
-  }, [selectedTeamIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Flush interval runs independently — does not restart when selection changes.
-  useEffect(() => {
-    function flush() {
+    // Flush buffered points to state at most 4× per second.
+    const flushInterval = setInterval(() => {
       const pending = pendingPointsRef.current;
       if (Object.keys(pending).length === 0) return;
       pendingPointsRef.current = {};
@@ -408,111 +341,72 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
         }
         return next;
       });
-    }
-    flushNowRef.current = flush;
-    const interval = setInterval(flush, 100);
+    }, 250);
+
     return () => {
-      clearInterval(interval);
-      for (const client of Object.values(wsMapRef.current)) client.close();
-      wsMapRef.current        = {};
+      clearInterval(flushInterval);
+      for (const client of Object.values(wsMap)) client.close();
       pendingPointsRef.current = {};
       prevFrameTsRef.current   = {};
     };
-  }, []); // mount/unmount only
+  }, [teamIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── History data: fetch on demand per selected team, paginated ───────────
+  // ── History data ──────────────────────────────────────────────────────────
   const [historyDataByTeam, setHistoryDataByTeam] = useState({});
-  const fetchedHistoryRef   = useRef(new Set());
-  const historyHasMoreRef   = useRef({});
-  const historyLoadingRef   = useRef({});
-  const historyOldestTsRef  = useRef({});
+  useEffect(() => {
+    if (!eventId || teams.length === 0) return;
+    Promise.all(
+      teams.map((t) =>
+        fetchTeamFrames(t.team_id, { eventId, limit: 10000 })
+          .then((frames) => ({ teamId: t.team_id, points: expandFrames(frames) }))
+          .catch(() => ({ teamId: t.team_id, points: [] })),
+      ),
+    ).then((results) => {
+      const map = {};
+      for (const { teamId, points } of results) map[teamId] = points;
+      setHistoryDataByTeam(map);
+    });
+  }, [eventId, teamIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Info for all selected teams ───────────────────────────────────────────
+  // Map: teamId → { ecu, violations } | null (null = still loading)
+  const [teamInfoMap, setTeamInfoMap] = useState({});
 
   useEffect(() => {
-    if (!eventId) return;
-    for (const teamId of selectedTeamIds) {
-      if (fetchedHistoryRef.current.has(teamId)) continue;
-      fetchedHistoryRef.current.add(teamId);
-      historyHasMoreRef.current[teamId] = true;
-      const ecuId = ecuByTeamId[teamId]?.id;
-      if (!ecuId) {
-        setHistoryDataByTeam((prev) => ({ ...prev, [teamId]: [] }));
-        historyHasMoreRef.current[teamId] = false;
-        continue;
+    // Load info for any selected team we don't have yet; drop teams no longer selected.
+    setTeamInfoMap((prev) => {
+      // Remove teams no longer selected.
+      const pruned = {};
+      for (const id of selectedTeamIds) {
+        if (prev[id] !== undefined) pruned[id] = prev[id];
       }
-      fetchEcuHistory(ecuId, { limit: 500, teamId })
-        .then((frames) => {
-          const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-          setHistoryDataByTeam((prev) => ({ ...prev, [teamId]: expandFrames(sorted) }));
-          historyOldestTsRef.current[teamId] = sorted[0]?.timestamp ?? null;
-          if (frames.length < 500) historyHasMoreRef.current[teamId] = false;
-        })
-        .catch(() => {
-          setHistoryDataByTeam((prev) => ({ ...prev, [teamId]: [] }));
-          historyHasMoreRef.current[teamId] = false;
-        });
-    }
-  }, [selectedTeamIds, eventId, ecuByTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
+      return pruned;
+    });
 
-  // Shared scroll sync across all three history charts.
-  const historyScrollElsRef = useRef([]);
-  const registerHistoryScrollEl = useCallback((el) => {
-    if (el && !historyScrollElsRef.current.includes(el)) {
-      historyScrollElsRef.current.push(el);
-    }
-  }, []);
-  const syncHistoryScroll = useCallback((scrollLeft) => {
-    for (const el of historyScrollElsRef.current) {
-      if (el.scrollLeft !== scrollLeft) el.scrollLeft = scrollLeft;
-    }
-  }, []);
-
-  const loadMoreHistory = useCallback(() => {
+    // Fetch missing teams.
     for (const teamId of selectedTeamIds) {
-      if (!historyHasMoreRef.current[teamId]) continue;
-      if (historyLoadingRef.current[teamId]) continue;
-      const before = historyOldestTsRef.current[teamId];
-      if (!before) continue;
-      const ecuId = ecuByTeamId[teamId]?.id;
-      if (!ecuId) continue;
-      historyLoadingRef.current[teamId] = true;
-      fetchEcuHistory(ecuId, { limit: 500, teamId, before })
-        .then((frames) => {
-          if (frames.length === 0) { historyHasMoreRef.current[teamId] = false; return; }
-          const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-          setHistoryDataByTeam((prev) => ({
-            ...prev,
-            [teamId]: [...expandFrames(sorted), ...(prev[teamId] ?? [])],
-          }));
-          historyOldestTsRef.current[teamId] = sorted[0]?.timestamp ?? before;
-          if (frames.length < 500) historyHasMoreRef.current[teamId] = false;
-        })
-        .catch(() => {})
-        .finally(() => { historyLoadingRef.current[teamId] = false; });
+      setTeamInfoMap((prev) => {
+        if (prev[teamId] !== undefined) return prev; // already have it
+        // Start fetch; mark as loading with null.
+        const ecu = ecuByTeamId[teamId];
+        if (!ecu) {
+          return { ...prev, [teamId]: { ecu: null, violations: [] } };
+        }
+        fetchViolations(ecu.id, 50)
+          .then((violations) =>
+            setTeamInfoMap((p) => ({ ...p, [teamId]: { ecu, violations } })),
+          )
+          .catch(() =>
+            setTeamInfoMap((p) => ({ ...p, [teamId]: { ecu, violations: [] } })),
+          );
+        return { ...prev, [teamId]: null }; // null = loading
+      });
     }
   }, [selectedTeamIds, ecuByTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Info panels for all selected teams ───────────────────────────────────
-  const [ecuInfoByTeamId, setEcuInfoByTeamId] = useState({});
-  const fetchedTeamIds = useRef(new Set());
-
-  useEffect(() => {
-    for (const teamId of selectedTeamIds) {
-      if (fetchedTeamIds.current.has(teamId)) continue;
-      fetchedTeamIds.current.add(teamId);
-      const ecu = ecuByTeamId[teamId];
-      if (!ecu) {
-        setEcuInfoByTeamId((p) => ({ ...p, [teamId]: { ecu: null, violations: [] } }));
-      } else {
-        fetchViolations(ecu.id, 50)
-          .then((violations) => setEcuInfoByTeamId((p) => ({ ...p, [teamId]: { ecu, violations } })))
-          .catch(() => setEcuInfoByTeamId((p) => ({ ...p, [teamId]: { ecu, violations: [] } })));
-      }
-    }
-  }, [selectedTeamIds, ecuByTeamId]);
-
   // ── Chip interaction ──────────────────────────────────────────────────────
   function handleChipClick(teamId) {
-    flushNowRef.current?.();
+    setActiveTeamId(teamId);
     setSelectedTeamIds((prev) => {
       const next = new Set(prev);
       if (next.has(teamId)) next.delete(teamId);
@@ -582,23 +476,24 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
       <div className="overview-filter-row">
         <button
           className="overview-filter-preset"
-          onClick={() => setSelectedTeamIds(new Set(allTeamIds))}
+          onClick={() => { setSelectedTeamIds(new Set(allTeamIds)); setActiveTeamId(null); }}
         >
           All
         </button>
         <button
           className="overview-filter-preset"
-          onClick={() => setSelectedTeamIds(new Set())}
+          onClick={() => { setSelectedTeamIds(new Set()); setActiveTeamId(null); }}
         >
           None
         </button>
         <div className="overview-chips">
-          {teams.map((t) => {
+          {stableTeams.map((t) => {
             const inChart = selectedTeamIds.has(t.team_id);
+            const isActive = activeTeamId === t.team_id;
             return (
               <button
                 key={t.team_id}
-                className={`team-chip ${inChart ? "team-chip--selected" : ""}`}
+                className={`team-chip ${inChart ? "team-chip--selected" : ""} ${isActive ? "team-chip--active" : ""}`}
                 style={{ "--chip-color": teamColors[t.team_id] }}
                 onClick={() => handleChipClick(t.team_id)}
               >
@@ -623,9 +518,6 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="V"
-            onLoadMore={chartView === "history" ? loadMoreHistory : undefined}
-            onScrollSync={chartView === "history" ? syncHistoryScroll : undefined}
-            registerScrollEl={chartView === "history" ? registerHistoryScrollEl : undefined}
           />
         </div>
         <div className="chart-section">
@@ -636,9 +528,6 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="A"
-            onLoadMore={chartView === "history" ? loadMoreHistory : undefined}
-            onScrollSync={chartView === "history" ? syncHistoryScroll : undefined}
-            registerScrollEl={chartView === "history" ? registerHistoryScrollEl : undefined}
           />
         </div>
         <div className="chart-section">
@@ -649,34 +538,33 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="W"
-            onLoadMore={chartView === "history" ? loadMoreHistory : undefined}
-            onScrollSync={chartView === "history" ? syncHistoryScroll : undefined}
-            registerScrollEl={chartView === "history" ? registerHistoryScrollEl : undefined}
           />
         </div>
       </div>
 
-      {/* Team info panels — one per selected team */}
+      {/* Team info panels — one card per selected team, in stable order */}
       {selectedTeamIds.size > 0 && (
-        <div className="overview-info-panels">
-          {teams
+        <div className="overview-info-panels-row">
+          {stableTeams
             .filter((t) => selectedTeamIds.has(t.team_id))
             .map((t) => {
-              const info = ecuInfoByTeamId[t.team_id];
+              const info = teamInfoMap[t.team_id];
+              const color = teamColors[t.team_id];
               return (
-                <div key={t.team_id} className="overview-info-panel">
+                <div
+                  key={t.team_id}
+                  className="overview-info-panel"
+                  style={{ "--team-color": color }}
+                >
                   <div className="overview-info-header">
-                    <span
-                      className="overview-info-team-dot"
-                      style={{ background: teamColors[t.team_id] }}
-                    />
+                    <span className="overview-info-team-dot" style={{ background: color }} />
                     <h3 className="overview-info-team-name">{t.team_name}</h3>
                   </div>
 
-                  {info == null ? (
+                  {info === null || info === undefined ? (
                     <p className="overview-info-loading">Loading…</p>
                   ) : info.ecu == null ? (
-                    <p className="overview-info-loading">No ECU assigned to this team</p>
+                    <p className="overview-info-loading">No ECU assigned</p>
                   ) : (
                     <>
                       <div className="overview-info-cards">

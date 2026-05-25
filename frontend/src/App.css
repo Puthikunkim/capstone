@@ -1706,26 +1706,26 @@ body {
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 20px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
   padding: 4px 12px 4px 8px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
-  opacity: 0.5;
+  opacity: 0.45;
 }
 .team-chip:hover {
-  opacity: 1;
-  background: color-mix(in srgb, var(--chip-color) 10%, transparent);
-  border-color: var(--chip-color, var(--border));
+  opacity: 0.75;
   color: var(--text-primary);
 }
+/* Selected = included in chart: show the team's color on border + fill */
 .team-chip--selected {
-  opacity: 1;
-  background: color-mix(in srgb, var(--chip-color) 15%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
   color: var(--text-primary);
   border-color: var(--chip-color, var(--border-light));
+  opacity: 1;
 }
+/* Active = info panel team: extra glow ring */
 .team-chip--active {
   box-shadow: 0 0 0 2px var(--chip-color, var(--accent));
 }
@@ -1744,22 +1744,25 @@ body {
   gap: 16px;
 }
 
-/* Team info panels grid */
-.overview-info-panels {
-  display: grid;
-  grid-template-columns: 1fr;
+/* Team info panels — one per selected team, laid out side-by-side */
+.overview-info-panels-row {
+  display: flex;
+  flex-wrap: wrap;
   gap: 16px;
+  align-items: flex-start;
 }
 
-/* Team info panel */
 .overview-info-panel {
   background: var(--bg-card);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--team-color, var(--accent));
   border-radius: var(--radius);
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1 1 280px;
+  min-width: 260px;
 }
 
 .overview-info-header {
