@@ -165,7 +165,8 @@ static SemaphoreHandle_t ring_mutex;
 
 //Sleep Mode
 #define SLEEP_VOLTAGE_THRESH_MV  200
-#define SLEEP_CURRENT_THRESH_MA  200
+#define SLEEP_CURRENT_MAX_MA  1250
+#define SLEEP_CURRENT_MIN_MA 1200
 #define SLEEP_ENTRY_MS           30000
 
 static volatile bool modem_sleeping     = false;
@@ -599,6 +600,10 @@ void adc_task(void *arg) {
                 //is_c_low = true;
             }
 
+            if (mv_v < 155) {
+                mv_v = 0;
+            }
+
             /*if (is_c_low) {
                 mv_c = 100;
             */
@@ -607,15 +612,22 @@ void adc_task(void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
-            int32_t power_mw = ((int32_t)(mv_v * 25 + 264) * mv_c) / 1000;
-            if (power_mw > power_threshold_mw) {
+            int32_t real_current_ma = (int32_t)(mv_c * 5.58f - 6860);
+
+            int32_t real_voltage_mv = (int32_t)(mv_v * 25);
+
+            // int32_t power_mw = (real_voltage_mv * real_current_ma) / 1000;
+
+            //int32_t power_mw = ((int32_t)(mv_v * 25 + 264) * mv_c) / 1000;
+            // if (power_mw > power_threshold_mw) {
+            if (real_current_ma > power_threshold_mw) {   
                 if (!over_power_flag) {
                     over_power_flag     = true;
                     over_power_start_ms = now;
                     ESP_LOGE(TAG,
                              "OVER POWER: %ld mW > threshold %ld mW "
                              "(V=%d mV, I=%d mV)",
-                             power_mw, power_threshold_mw,
+                             real_current_ma, power_threshold_mw,
                              (int16_t)mv_v, (int16_t)mv_c);
                 }
             } else {
@@ -624,7 +636,7 @@ void adc_task(void *arg) {
                     buzzer_set(false);
                     ESP_LOGI(TAG,
                              "Power back to normal: %ld mW <= threshold %ld mW",
-                             power_mw, power_threshold_mw);
+                             real_current_ma, power_threshold_mw);
                 }
             }
 
@@ -646,8 +658,8 @@ void adc_task(void *arg) {
             ring_write++;
             xSemaphoreGive(ring_mutex);
 
-            bool low_activity = (mv_v < SLEEP_VOLTAGE_THRESH_MV /*&& 
-                     mv_c < SLEEP_CURRENT_THRESH_MA*/);
+            bool low_activity = (mv_v < SLEEP_VOLTAGE_THRESH_MV &&
+                    SLEEP_CURRENT_MIN_MA < mv_c && mv_c < SLEEP_CURRENT_MAX_MA);
 
             if (low_activity) {
                 if (!modem_sleeping) {
@@ -692,6 +704,8 @@ void sender_task(void *arg) {
         while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
             uint16_t slot = ring_read % SAMPLE_RING_SIZE;
             current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv*5.58 - 6860);
+            //current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv);
+            //voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv);
             voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv * 25 );
             now = sample_ring[slot].sampled_at;
             sample_index++;
