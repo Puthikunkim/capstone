@@ -163,7 +163,6 @@ export function LeaderboardPage({ eventId, eventType, ecuList = [] }) {
       )}
       {allTeams.length > 0 && (
         <AllTeamsOverview
-          eventId={eventId}
           teams={allTeams}
           ecuList={ecuList}
         />

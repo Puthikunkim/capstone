@@ -453,8 +453,10 @@ body {
   outline: none;
   width: 100%;
   transition: border-color 0.15s;
+  color-scheme: dark;
 }
 .form-input:focus { border-color: var(--accent); }
+.form-input::-webkit-calendar-picker-indicator { cursor: pointer; }
 .form-input.readonly { color: var(--text-secondary); cursor: default; }
 .form-input option { background: var(--bg-card); }
 
