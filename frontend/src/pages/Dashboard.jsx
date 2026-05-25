@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import PropTypes from "prop-types";
 import { TelemetryChart, HistoryChart } from "../components/TelemetryChart";
 import { useTeamWebSocket } from "../hooks/useWebSocket";
@@ -12,6 +12,13 @@ import {
   fetchFirmwareStatus,
 } from "../api/http";
 
+// Ensure a server timestamp string is treated as UTC.
+// The backend omits the Z suffix, so without this browsers parse it as local time.
+function ensureUtc(ts) {
+  if (!ts) return ts;
+  return ts.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(ts) ? ts : ts + 'Z';
+}
+
 // Expand a single frame's samples into individual time-stamped points.
 // The last sample gets the frame's timestamp; earlier samples are spread
 // back toward prevTimestamp (or bunched at the frame timestamp if unknown).
@@ -21,8 +28,8 @@ function expandSingleFrame(frame, prevTimestamp) {
   const n = Math.max(voltages.length, currents.length);
   if (n === 0) return [];
 
-  const tEnd = new Date(frame.timestamp).getTime();
-  const tStart = prevTimestamp ? new Date(prevTimestamp).getTime() : tEnd;
+  const tEnd = new Date(ensureUtc(frame.timestamp)).getTime();
+  const tStart = prevTimestamp ? new Date(ensureUtc(prevTimestamp)).getTime() : tEnd;
 
   return Array.from({ length: n }, (_, j) => {
     const v = voltages[j] ?? null;
@@ -138,7 +145,7 @@ AlertItem.propTypes = {
 
 function toLocalInput(utcIso) {
   if (!utcIso) return "";
-  const d = new Date(utcIso);
+  const d = new Date(ensureUtc(utcIso));
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -391,9 +398,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     setCurrentView("live");
     setPowerView("live");
 
-    const hasTimeRange = participant?.start != null && participant?.duration_seconds != null;
+    const eventTimeRange = participant?.start != null && participant?.duration_seconds != null;
 
-    if (hasTimeRange) {
+    if (eventTimeRange) {
       // Start+duration set: show team frames within the event time window
       fetchTeamFrames(teamId, { eventId: participant.event_id, limit: 10000 })
         .then((frames) => {
@@ -481,6 +488,18 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   useEffect(() => {
     historyOldestTsRef.current = historyPoints[0]?.timestamp ?? null;
   }, [historyPoints]);
+
+  const hasTimeRange = participant?.start != null && participant?.duration_seconds != null;
+
+  const filteredHistoryPoints = useMemo(() => {
+    if (!hasTimeRange) return historyPoints;
+    const startMs = new Date(ensureUtc(participant.start)).getTime();
+    const endMs = startMs + participant.duration_seconds * 1000;
+    return historyPoints.filter((p) => {
+      const t = new Date(p.timestamp).getTime();
+      return t >= startMs && t <= endMs;
+    });
+  }, [historyPoints, hasTimeRange, participant?.start, participant?.duration_seconds]);
 
   // ── Config form ──────────────────────────────────────────────────
 
@@ -766,12 +785,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             )
           ) : (
             <HistoryChart
-              data={historyPoints}
+              data={filteredHistoryPoints}
               dataKey="voltage"
               color="#00c6ff"
               unit="V"
               label="Voltage"
-              onLoadMore={loadMoreHistory}
+              onLoadMore={hasTimeRange ? undefined : loadMoreHistory}
             />
           )}
         </div>
@@ -811,12 +830,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             )
           ) : (
             <HistoryChart
-              data={historyPoints}
+              data={filteredHistoryPoints}
               dataKey="current"
               color="#f59e0b"
               unit="A"
               label="Current"
-              onLoadMore={loadMoreHistory}
+              onLoadMore={hasTimeRange ? undefined : loadMoreHistory}
             />
           )}
         </div>
@@ -856,12 +875,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             )
           ) : (
             <HistoryChart
-              data={historyPoints}
+              data={filteredHistoryPoints}
               dataKey="power"
               color="#10b981"
               unit="W"
               label="Power"
-              onLoadMore={loadMoreHistory}
+              onLoadMore={hasTimeRange ? undefined : loadMoreHistory}
             />
           )}
         </div>
