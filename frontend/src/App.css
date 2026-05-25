@@ -22,10 +22,41 @@
   --text-primary:   #e8edf5;
   --text-secondary: #6b7a99;
   --text-muted:     #3d4f6a;
+  --bg-navbar:      #0d1220;
   --sidebar-w:      232px;
   --navbar-h:       52px;
   --radius:         10px;
   --radius-sm:      6px;
+}
+
+:root.light {
+  --bg-deep:        #f0f4f8;
+  --bg-surface:     #ffffff;
+  --bg-card:        #f8fafc;
+  --bg-input:       #f1f5f9;
+  --bg-navbar:      #0f172a;
+  --border:         #e2e8f0;
+  --border-light:   #cbd5e1;
+  --accent:         #0284c7;
+  --accent-dim:     rgba(2, 132, 199, 0.10);
+  --accent-glow:    rgba(2, 132, 199, 0.20);
+  --gray-dim:       rgba(0, 0, 0, 0.04);
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+}
+
+:root.light .navbar .icon-btn,
+:root.light .navbar .navbar-back-btn,
+:root.light .competitions-topbar .icon-btn {
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+:root.light .navbar .icon-btn:hover,
+:root.light .navbar .navbar-back-btn:hover,
+:root.light .competitions-topbar .icon-btn:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 html, body, #root { height: 100%; }
@@ -45,7 +76,7 @@ body {
 /* ── Navbar ──────────────────────────────────────────────────────── */
 .navbar {
   height: var(--navbar-h);
-  background: var(--bg-surface);
+  background: var(--bg-navbar);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -649,7 +680,7 @@ body {
 
 .competitions-topbar {
   height: var(--navbar-h);
-  background: var(--bg-surface);
+  background: var(--bg-navbar);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;

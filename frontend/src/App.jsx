@@ -106,6 +106,12 @@ export default function App() {
   const [violationLog, setViolationLog] = useState([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isDark, setIsDark] = useState(() => localStorage.getItem("theme") !== "light");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", !isDark);
+    localStorage.setItem("theme", isDark ? "dark" : "light");
+  }, [isDark]);
   // tracks which ecu_ids have escalated (confirmed violation) so "ended" knows whether to log
   const escalatedEcuIdsRef = useRef(new Set());
   // stable refs for ecuList / competitionTeams so the WS callback never goes stale
@@ -331,7 +337,7 @@ export default function App() {
   if (!selectedCompetition) {
     return (
       <>
-        <CompetitionsPage onSelectCompetition={setSelectedCompetition} />
+        <CompetitionsPage onSelectCompetition={setSelectedCompetition} isDark={isDark} onToggleTheme={() => setIsDark((v) => !v)} />
         <ToastContainer position="top-right" theme="dark" />
       </>
     );
@@ -361,6 +367,8 @@ export default function App() {
         onBack={() => setSelectedCompetition(null)}
         onTogglePanel={() => { setPanelOpen((v) => !v); setUnreadCount(0); }}
         unreadCount={unreadCount}
+        isDark={isDark}
+        onToggleTheme={() => setIsDark((v) => !v)}
       />
       <div className="app-body">
         {!backendError && (
