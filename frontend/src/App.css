@@ -341,6 +341,31 @@ body {
   border-radius: 2px;
 }
 
+/* Shared multi-team history scrollbar — full-size, clearly visible */
+.overview-hist-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  margin-top: 8px;
+  scrollbar-width: auto;
+  scrollbar-color: var(--accent, #00c6ff) var(--surface-2, #1e2a3a);
+}
+
+.overview-hist-scrollbar::-webkit-scrollbar {
+  height: 12px;
+}
+
+.overview-hist-scrollbar::-webkit-scrollbar-track {
+  background: var(--surface-2, #1e2a3a);
+  border-radius: 6px;
+}
+
+.overview-hist-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--accent, #00c6ff);
+  border-radius: 6px;
+  border: 2px solid var(--surface-2, #1e2a3a);
+}
+
 /* Telemetry chart */
 .telemetry-chart { display: flex; flex-direction: column; gap: 10px; }
 

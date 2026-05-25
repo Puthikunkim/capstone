@@ -177,22 +177,20 @@ const MIN_CHART_WIDTH = 600;
 const OVERSCAN = 150;
 
 function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit, chartView, historyLoading, onLoadMore }) {
-  const scrollRef          = useRef(null);
-  const isAtEnd            = useRef(true);
-  const rafRef             = useRef(null);
-  const loadingMoreRef     = useRef(false);
-  const prevDataLenRef     = useRef(0);
-  const prevFirstLabelRef  = useRef(null);
+  const scrollRef         = useRef(null);
+  const isAtEnd           = useRef(true);
+  const rafRef            = useRef(null);
+  const loadingMoreRef    = useRef(false);
+  const prevDataLenRef    = useRef(0);
+  const prevFirstLabelRef = useRef(null);
   const [scrollLeft, setScrollLeft] = useState(0);
 
   useEffect(() => {
     if (chartView !== "history") return;
     const el = scrollRef.current;
     if (!el || !mergedData.length) return;
-
     const firstLabel = mergedData[0]?.timeLabel ?? null;
     if (prevFirstLabelRef.current && firstLabel !== prevFirstLabelRef.current) {
-      // Data was prepended — shift right to keep the visible window stable.
       const added = mergedData.length - prevDataLenRef.current;
       el.scrollLeft += added * PX_PER_BUCKET;
       setScrollLeft(el.scrollLeft);
@@ -201,7 +199,6 @@ function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, un
       el.scrollLeft = el.scrollWidth;
       setScrollLeft(el.scrollLeft);
     }
-
     prevFirstLabelRef.current = firstLabel;
     prevDataLenRef.current    = mergedData.length;
   }, [mergedData, chartView]);
@@ -214,12 +211,10 @@ function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, un
     const el = scrollRef.current;
     if (!el) return;
     isAtEnd.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
-
     if (el.scrollLeft < 300 && onLoadMore && !loadingMoreRef.current) {
       loadingMoreRef.current = true;
       onLoadMore();
     }
-
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => setScrollLeft(el.scrollLeft));
   };
@@ -631,6 +626,7 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
   const voltageData = chartView === "live" ? liveMerged.voltage : histMerged.voltage;
   const currentData = chartView === "live" ? liveMerged.current : histMerged.current;
   const powerData   = chartView === "live" ? liveMerged.power   : histMerged.power;
+
 
   if (teams.length === 0) return null;
 
