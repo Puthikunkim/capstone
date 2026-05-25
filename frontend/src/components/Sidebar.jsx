@@ -8,9 +8,7 @@ const EVENT_LABELS = {
 };
 
 function ecuStatus(ecu) {
-  if (ecu.is_connected) return "connected";
-  if (ecu.last_seen) return "lost";
-  return "disconnected";
+  return ecu.is_connected ? "connected" : "disconnected";
 }
 
 function FlashIndicator({ flashUsage }) {
@@ -28,9 +26,8 @@ function FlashIndicator({ flashUsage }) {
 }
 FlashIndicator.propTypes = { flashUsage: PropTypes.number };
 
-function TeamCard({ team, ecu, isActive, isViolating, onSelect }) {
-  const status = ecu ? ecuStatus(ecu) : "disconnected";
-  const dotClass = isViolating ? "violation" : status;
+function TeamCard({ team, ecu, isActive, onSelect }) {
+  const dotClass = ecu ? ecuStatus(ecu) : "disconnected";
   return (
     <div
       className={`sidebar-team-card ${isActive ? "active" : ""} ${!ecu ? "no-ecu" : ""}`}
@@ -59,7 +56,6 @@ TeamCard.propTypes = {
   team: PropTypes.object.isRequired,
   ecu: PropTypes.object,
   isActive: PropTypes.bool,
-  isViolating: PropTypes.bool,
   onSelect: PropTypes.func.isRequired,
 };
 
@@ -100,9 +96,7 @@ export function Sidebar({
           ) : (
             (competitionTeams ?? []).map((team) => {
               const ecu = ecuList.find((e) => e.team_id === team.id);
-              const status = ecu ? ecuStatus(ecu) : null;
-              const isViolating = ecu ? (violatingEcuIds ?? new Set()).has(ecu.id) : false;
-              const dotClass = isViolating ? "violation" : status;
+              const dotClass = ecu ? ecuStatus(ecu) : null;
               return (
                 <div key={team.id} className="sidebar-team-card" style={{ cursor: "default" }}>
                   <div className="team-card-top">
@@ -194,14 +188,12 @@ export function Sidebar({
         {filteredTeams.map((team) => {
           const ecu = ecuList.find((e) => e.team_id === team.id);
           const isActive = ecu ? selectedEcuId === ecu.id : selectedTeamId === team.id;
-          const isViolating = ecu ? (violatingEcuIds ?? new Set()).has(ecu.id) : false;
           return (
             <TeamCard
               key={team.id}
               team={team}
               ecu={ecu}
               isActive={isActive}
-              isViolating={isViolating}
               onSelect={() => onSelectTeam(team)}
               onUnassign={() => onUnassignEcu && onUnassignEcu(team, ecu)}
             />

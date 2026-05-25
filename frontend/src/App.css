@@ -179,17 +179,7 @@ body {
 
 .ecu-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .ecu-dot.connected    { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.ecu-dot.lost         { background: var(--orange); }
-.ecu-dot.disconnected { background: var(--text-muted); }
-.ecu-dot.violation    {
-  background: var(--red);
-  box-shadow: 0 0 6px var(--red);
-  animation: violation-pulse 1s ease-in-out infinite;
-}
-@keyframes violation-pulse {
-  0%, 100% { box-shadow: 0 0 4px var(--red); }
-  50%       { box-shadow: 0 0 10px var(--red), 0 0 18px rgba(239,68,68,0.5); }
-}
+.ecu-dot.disconnected { background: var(--red); box-shadow: 0 0 6px var(--red); }
 
 .ecu-flash-value {
   display: flex; align-items: center; gap: 3px;
