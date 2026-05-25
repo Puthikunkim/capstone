@@ -81,7 +81,12 @@ class WebSocketClient {
     }
 
     if (this.ws) {
-      this.ws.close();
+      const ws = this.ws;
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.onopen = () => ws.close();
+      } else {
+        ws.close();
+      }
       this.ws = null;
     }
   }
