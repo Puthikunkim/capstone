@@ -8,8 +8,6 @@ import {
   fetchTeamFrames,
   fetchViolations,
   configureEcu,
-  uploadFirmware,
-  fetchFirmwareStatus,
 } from "../api/http";
 
 // Ensure a server timestamp string is treated as UTC.
@@ -301,14 +299,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const [configError, setConfigError] = useState(null);
   const [configSuccess, setConfigSuccess] = useState(false);
 
-  // Firmware upload state
-  const [firmwareFile, setFirmwareFile] = useState(null);
-  const [firmwareFileError, setFirmwareFileError] = useState(null);
-  const [firmwareUploading, setFirmwareUploading] = useState(false);
-  const [firmwareStatus, setFirmwareStatus] = useState(null);
-  const [firmwareError, setFirmwareError] = useState(null);
-  const firmwareInputRef = useRef(null);
-
   // Mirror historyPoints[0].timestamp in a ref so loadMoreHistory stays stable.
   const historyOldestTsRef = useRef(null);
 
@@ -347,10 +337,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
 
     setConfigError(null);
     setConfigSuccess(false);
-    setFirmwareStatus(null);
-    setFirmwareError(null);
-    setFirmwareFile(null);
-    setFirmwareFileError(null);
 
     fetchEcu(selectedEcuId)
       .then((ecu) => {
@@ -368,9 +354,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       .then(setViolations)
       .catch(() => setViolations([]));
 
-    fetchFirmwareStatus(selectedEcuId)
-      .then(setFirmwareStatus)
-      .catch(() => {});
   }, [selectedEcuId]);
 
   // Fetch chart data when ECU/team/participant timing changes
@@ -559,42 +542,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     [selectedEcuId, configForm]
   );
 
-  // ── Firmware upload ──────────────────────────────────────────────
-
-  const handleFirmwareFileChange = (e) => {
-    const file = e.target.files?.[0];
-    setFirmwareFileError(null);
-    setFirmwareError(null);
-
-    if (!file) {
-      setFirmwareFile(null);
-      return;
-    }
-    if (!file.name.endsWith(".bin")) {
-      setFirmwareFileError("Only .bin firmware files are accepted.");
-      setFirmwareFile(null);
-      e.target.value = "";
-      return;
-    }
-    setFirmwareFile(file);
-  };
-
-  const handleFirmwareUpload = useCallback(async () => {
-    if (!firmwareFile || !selectedEcuId) return;
-    setFirmwareUploading(true);
-    setFirmwareError(null);
-    try {
-      const result = await uploadFirmware(selectedEcuId, firmwareFile);
-      setFirmwareStatus(result);
-      setFirmwareFile(null);
-      if (firmwareInputRef.current) firmwareInputRef.current.value = "";
-    } catch (err) {
-      setFirmwareError(err.message);
-    } finally {
-      setFirmwareUploading(false);
-    }
-  }, [firmwareFile, selectedEcuId]);
-
   // ── Render: error state ──────────────────────────────────────────
 
   if (backendError) {
@@ -643,12 +590,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const classLabel = ecuData?.vehicle_class ?? "--";
 
   const lastSample = chartData.length > 0 ? chartData[chartData.length - 1] : null;
-
-  // Flash display — show raw KB value, or "--" if unknown
-  const flashDisplay = ecuData?.flash_usage != null
-    ? `${Math.round(ecuData.flash_usage / 1024)} KB`
-    : "--";
-
 
   return (
     <div className="dashboard">
@@ -1015,68 +956,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </button>
           </form>
 
-          {/* Firmware Upload */}
-          <div className="firmware-section">
-            <div className="firmware-header">
-              <span className="card-title">Firmware Update</span>
-              {firmwareStatus && (
-                <span className={`firmware-status-badge ${firmwareStatus.status}`}>
-                  {firmwareStatus.status}
-                </span>
-              )}
-            </div>
-
-            <div className="firmware-upload-row">
-              <label className="file-input-label">
-                <input
-                  ref={firmwareInputRef}
-                  type="file"
-                  accept=".bin"
-                  onChange={handleFirmwareFileChange}
-                  className="file-input-hidden"
-                />
-                <span className="file-input-text">
-                  {firmwareFile ? firmwareFile.name : "Choose .bin file…"}
-                </span>
-                <span className="file-input-btn">Browse</span>
-              </label>
-              <button
-                className="btn-primary"
-                onClick={handleFirmwareUpload}
-                disabled={!firmwareFile || firmwareUploading}
-              >
-                {firmwareUploading ? "Uploading…" : "Upload"}
-              </button>
-            </div>
-
-            {firmwareFileError && (
-              <div className="form-feedback error">{firmwareFileError}</div>
-            )}
-            {firmwareError && (
-              <div className="form-feedback error">{firmwareError}</div>
-            )}
-            {firmwareStatus?.filename && (
-              <div className="firmware-info">
-                <span>Last: {firmwareStatus.filename}</span>
-                {firmwareStatus.progress > 0 && firmwareStatus.progress < 100 && (
-                  <div className="firmware-progress-bar">
-                    <div
-                      className="firmware-progress-fill"
-                      style={{ width: `${firmwareStatus.progress}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flash-row">
-              <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
-                <rect x="2" y="4" width="12" height="8" rx="1" stroke="currentColor" strokeWidth="1.3" />
-                <path d="M5 4V3M11 4V3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-              </svg>
-              <span>Flash memory usage: {flashDisplay}</span>
-            </div>
-          </div>
         </div>
 
         {/* System Alerts */}

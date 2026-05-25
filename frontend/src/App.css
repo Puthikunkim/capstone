@@ -514,60 +514,6 @@ body {
 .btn-primary:not(:disabled):hover { opacity: 0.88; }
 .btn-primary.full-width { width: 100%; }
 
-/* ── Firmware section ────────────────────────────────────────────── */
-.firmware-section {
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-
-.firmware-header { display: flex; align-items: center; justify-content: space-between; }
-
-.firmware-status-badge {
-  font-size: 11px; font-weight: 600;
-  padding: 2px 8px; border-radius: 20px;
-  text-transform: capitalize;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-.firmware-status-badge.success { color: var(--green); border-color: rgba(34,197,94,0.3); background: var(--green-dim); }
-.firmware-status-badge.failed  { color: var(--red);   border-color: rgba(239,68,68,0.3); background: var(--red-dim); }
-
-.firmware-upload-row { display: flex; gap: 8px; }
-
-.file-input-label {
-  flex: 1;
-  display: flex; align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  cursor: pointer;
-}
-.file-input-hidden { display: none; }
-.file-input-text {
-  flex: 1; padding: 8px 10px;
-  font-size: 12px; color: var(--text-secondary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.file-input-btn {
-  background: var(--border);
-  padding: 8px 12px;
-  font-size: 12px; font-weight: 600; color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.firmware-info { font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 6px; }
-
-.firmware-progress-bar {
-  height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
-}
-.firmware-progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
-
-.flash-row {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text-muted);
-}
 
 /* ── Alerts card ─────────────────────────────────────────────────── */
 .alerts-icon { color: var(--yellow); }
