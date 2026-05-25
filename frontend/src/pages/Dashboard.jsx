@@ -286,7 +286,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const energyAccRef = useRef(0);         // running energy total (Wh)
   const lastEnergyPointRef = useRef(null); // last sample point used in integration
   const [totalEnergyWh, setTotalEnergyWh] = useState(null);
+  const [lastFrameAvgVoltage, setLastFrameAvgVoltage] = useState(null);
   const [lastFrameAvgCurrent, setLastFrameAvgCurrent] = useState(null);
+  const [lastFrameAvgPower, setLastFrameAvgPower] = useState(null);
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -380,7 +382,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       energyAccRef.current = 0;
       lastEnergyPointRef.current = null;
       setTotalEnergyWh(null);
+      setLastFrameAvgVoltage(null);
       setLastFrameAvgCurrent(null);
+      setLastFrameAvgPower(null);
       setVoltageView("live");
       setCurrentView("live");
       setPowerView("live");
@@ -393,7 +397,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     energyAccRef.current = 0;
     lastEnergyPointRef.current = null;
     setTotalEnergyWh(null);
+    setLastFrameAvgVoltage(null);
     setLastFrameAvgCurrent(null);
+    setLastFrameAvgPower(null);
     setVoltageView("live");
     setCurrentView("live");
     setPowerView("live");
@@ -414,8 +420,14 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           setHistoryPoints(expanded);
           setChartData(expanded.slice(-1000));
           const lastFrame = sorted[sorted.length - 1];
-          const samples = lastFrame?.current_samples;
-          if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
+          const vSamples = lastFrame?.voltage_samples;
+          const cSamples = lastFrame?.current_samples;
+          if (vSamples?.length) setLastFrameAvgVoltage(vSamples.reduce((a, b) => a + b, 0) / vSamples.length);
+          if (cSamples?.length) setLastFrameAvgCurrent(cSamples.reduce((a, b) => a + b, 0) / cSamples.length);
+          if (vSamples?.length && cSamples?.length) {
+            const n = Math.min(vSamples.length, cSamples.length);
+            setLastFrameAvgPower(vSamples.slice(0, n).reduce((sum, v, i) => sum + v * cSamples[i], 0) / n);
+          }
         })
         .catch(() => {});
     } else {
@@ -439,8 +451,14 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           setHistoryPoints(expandedHist);
           if (histFrames.length < 500) historyHasMoreRef.current = false;
           const lastFrame = sortedLive[sortedLive.length - 1];
-          const samples = lastFrame?.current_samples;
-          if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
+          const vSamples = lastFrame?.voltage_samples;
+          const cSamples = lastFrame?.current_samples;
+          if (vSamples?.length) setLastFrameAvgVoltage(vSamples.reduce((a, b) => a + b, 0) / vSamples.length);
+          if (cSamples?.length) setLastFrameAvgCurrent(cSamples.reduce((a, b) => a + b, 0) / cSamples.length);
+          if (vSamples?.length && cSamples?.length) {
+            const n = Math.min(vSamples.length, cSamples.length);
+            setLastFrameAvgPower(vSamples.slice(0, n).reduce((sum, v, i) => sum + v * cSamples[i], 0) / n);
+          }
         })
         .catch(() => {});
     }
@@ -465,8 +483,14 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
-    const samples = liveData.current_samples;
-    if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
+    const vSamples = liveData.voltage_samples;
+    const cSamples = liveData.current_samples;
+    if (vSamples?.length) setLastFrameAvgVoltage(vSamples.reduce((a, b) => a + b, 0) / vSamples.length);
+    if (cSamples?.length) setLastFrameAvgCurrent(cSamples.reduce((a, b) => a + b, 0) / cSamples.length);
+    if (vSamples?.length && cSamples?.length) {
+      const n = Math.min(vSamples.length, cSamples.length);
+      setLastFrameAvgPower(vSamples.slice(0, n).reduce((sum, v, i) => sum + v * cSamples[i], 0) / n);
+    }
 
     // Integrate only the delta: [last known point, ...new points]
     const anchor = lastEnergyPointRef.current;
@@ -691,10 +715,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Voltage"
-          value={ecuIsConnected ? lastSample?.voltage?.toFixed(2) : "-"}
+          value={ecuIsConnected ? lastFrameAvgVoltage?.toFixed(2) : "-"}
           unit="V"
-          sub={ecuIsConnected && lastSample ? <><span className="stable-dot" /> Stable</> : "No data"}
-          subStyle={ecuIsConnected && lastSample ? "sub-stable" : "sub-muted"}
+          sub={ecuIsConnected && lastFrameAvgVoltage != null ? <><span className="stable-dot" /> Stable</> : "No data"}
+          subStyle={ecuIsConnected && lastFrameAvgVoltage != null ? "sub-stable" : "sub-muted"}
         />
         <StatCard
           icon={
@@ -717,17 +741,11 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Power Consumption"
-          value={
-            ecuIsConnected
-              ? lastSample?.voltage != null && lastSample?.current != null
-                ? (lastSample.voltage * lastSample.current).toFixed(2)
-                : null
-              : "-"
-          }
+          value={ecuIsConnected ? lastFrameAvgPower?.toFixed(2) : "-"}
           unit="W"
           sub={
-            ecuIsConnected && lastSample?.voltage != null && lastSample?.current != null
-              ? (lastSample.voltage * lastSample.current) >= 0 ? "Discharging" : "Charging"
+            ecuIsConnected && lastFrameAvgPower != null
+              ? lastFrameAvgPower >= 0 ? "Discharging" : "Charging"
               : "No data"
           }
           subStyle="sub-muted"
