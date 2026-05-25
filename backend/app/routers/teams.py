@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -71,6 +73,7 @@ def list_ecus_for_team(team_id: int, db: Session = Depends(get_db)):
 def get_team_frames(
     team_id: int,
     event_id: int | None = None,
+    before: datetime | None = None,
     limit: int | None = 100,
     db: Session = Depends(get_db),
 ):
@@ -78,7 +81,7 @@ def get_team_frames(
     if team is None:
         raise HTTPException(status_code=404, detail=_TEAM_NOT_FOUND)
     try:
-        return get_frames_for_team(db, team_id, event_id=event_id, limit=limit)
+        return get_frames_for_team(db, team_id, event_id=event_id, before=before, limit=limit)
     except TeamNotEnrolledInEventError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

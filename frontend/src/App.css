@@ -1734,12 +1734,11 @@ body {
   gap: 16px;
 }
 
-/* Team info panels — one per selected team, laid out side-by-side */
+/* Team info panels — one per selected team, stacked vertically */
 .overview-info-panels-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 16px;
-  align-items: flex-start;
 }
 
 .overview-info-panel {

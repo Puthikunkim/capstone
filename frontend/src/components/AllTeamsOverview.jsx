@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import PropTypes from "prop-types";
 import {
   LineChart,
@@ -53,12 +53,11 @@ function expandFrames(frames) {
 const teamKey = (teamId) => `t_${teamId}`;
 
 // ── Merge per-team data into a single Recharts-compatible array ───────────────
-// Live: index-aligned using each team's last maxPts points.
-// Avoids server/browser clock-skew by never comparing server timestamps to Date.now().
-function mergeForLiveChart(chartDataByTeam, selectedTeamIds, dataKey, maxPts = 200) {
-  if (selectedTeamIds.length === 0) return [];
 
-  // Slice each team to the last maxPts points and find the overall newest timestamp.
+// Live: one pass for all 3 channels, index-aligned using each team's last maxPts points.
+function mergeAllForLiveChart(chartDataByTeam, selectedTeamIds, maxPts = 200) {
+  if (selectedTeamIds.length === 0) return { voltage: [], current: [], power: [] };
+
   const slices = {};
   let newestMs = 0;
   let maxLen = 0;
@@ -71,69 +70,100 @@ function mergeForLiveChart(chartDataByTeam, selectedTeamIds, dataKey, maxPts = 2
       if (t > newestMs) newestMs = t;
     }
   }
-  if (maxLen === 0) return [];
+  if (maxLen === 0) return { voltage: [], current: [], power: [] };
 
-  // End-align all teams: index 0 = oldest, index maxLen-1 = newest.
-  const result = [];
+  const voltage = [], current = [], power = [];
   for (let i = 0; i < maxLen; i++) {
-    const entry = {};
+    const vEntry = {}, cEntry = {}, pEntry = {};
+    let label = "";
     let labelSet = false;
     for (const teamId of selectedTeamIds) {
       const pts = slices[teamId];
-      const offset = pts.length - maxLen; // negative when shorter than maxLen
+      const offset = pts.length - maxLen;
       const p = offset + i >= 0 ? pts[offset + i] : null;
-      entry[teamKey(teamId)] = p ? p[dataKey] : null;
+      const key = teamKey(teamId);
+      vEntry[key] = p?.voltage ?? null;
+      cEntry[key] = p?.current ?? null;
+      pEntry[key] = p?.power   ?? null;
       if (!labelSet && p) {
         const diffMs = newestMs - new Date(p.timestamp).getTime();
-        if (i === maxLen - 1) {
-          entry.timeLabel = "Now";
-        } else if (diffMs >= 60000) {
-          entry.timeLabel = `-${Math.floor(diffMs / 60000)}m${Math.round((diffMs % 60000) / 1000)}s`;
-        } else {
-          entry.timeLabel = `-${Math.round(diffMs / 1000)}s`;
-        }
+        if (i === maxLen - 1) label = "Now";
+        else if (diffMs >= 60000) label = `-${Math.floor(diffMs / 60000)}m${Math.round((diffMs % 60000) / 1000)}s`;
+        else label = `-${Math.round(diffMs / 1000)}s`;
         labelSet = true;
       }
     }
-    if (!labelSet) entry.timeLabel = "";
-    result.push(entry);
+    vEntry.timeLabel = cEntry.timeLabel = pEntry.timeLabel = label;
+    voltage.push(vEntry);
+    current.push(cEntry);
+    power.push(pEntry);
   }
-  return result;
+  return { voltage, current, power };
 }
 
-// History: 2s buckets spanning the full recorded range across all teams.
-function mergeForHistoryChart(historyDataByTeam, selectedTeamIds, dataKey) {
-  if (selectedTeamIds.length === 0) return [];
-  let minMs = Infinity;
-  let maxMs = -Infinity;
+// Binary search: find index of the point in sortedPts whose _ts is nearest to targetMs.
+function binarySearchNearest(sortedPts, targetMs) {
+  let lo = 0, hi = sortedPts.length - 1;
+  if (hi < 0) return null;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedPts[mid]._ts < targetMs) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo > 0) {
+    const before = sortedPts[lo - 1];
+    const after  = sortedPts[lo];
+    return (targetMs - before._ts) <= (after._ts - targetMs) ? before : after;
+  }
+  return sortedPts[lo];
+}
+
+// History: one pass for all 3 channels with pre-sort + binary search per bucket.
+// O(teams × points × log) instead of O(buckets × teams × points).
+function mergeAllForHistoryChart(historyDataByTeam, selectedTeamIds) {
+  if (selectedTeamIds.length === 0) return { voltage: [], current: [], power: [] };
+
+  // Pre-compute numeric timestamps once and sort each team's data.
+  const sortedByTeam = {};
+  let minMs = Infinity, maxMs = -Infinity;
   for (const teamId of selectedTeamIds) {
-    for (const p of (historyDataByTeam[teamId] ?? [])) {
-      const t = new Date(p.timestamp).getTime();
-      if (t < minMs) minMs = t;
-      if (t > maxMs) maxMs = t;
+    const pts = (historyDataByTeam[teamId] ?? []).map((p) => ({
+      ...p,
+      _ts: new Date(p.timestamp).getTime(),
+    })).sort((a, b) => a._ts - b._ts);
+    sortedByTeam[teamId] = pts;
+    if (pts.length > 0) {
+      if (pts[0]._ts < minMs) minMs = pts[0]._ts;
+      if (pts[pts.length - 1]._ts > maxMs) maxMs = pts[pts.length - 1]._ts;
     }
   }
-  if (!isFinite(minMs)) return [];
+  if (!Number.isFinite(minMs)) return { voltage: [], current: [], power: [] };
+
   const bucketMs = 2000;
-  const result = [];
+  const voltage = [], current = [], power = [];
   for (let t = minMs; t <= maxMs; t += bucketMs) {
     const label = new Date(t).toLocaleTimeString([], {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     });
-    const entry = { timeLabel: label };
+    const vEntry = { timeLabel: label };
+    const cEntry = { timeLabel: label };
+    const pEntry = { timeLabel: label };
     for (const teamId of selectedTeamIds) {
-      const pts = historyDataByTeam[teamId] ?? [];
-      let bestDiff = Infinity;
-      let bestVal = null;
-      for (const p of pts) {
-        const diff = Math.abs(new Date(p.timestamp).getTime() - t);
-        if (diff < bestDiff) { bestDiff = diff; bestVal = p[dataKey]; }
+      const key     = teamKey(teamId);
+      const nearest = binarySearchNearest(sortedByTeam[teamId], t);
+      if (nearest && Math.abs(nearest._ts - t) <= bucketMs) {
+        vEntry[key] = nearest.voltage;
+        cEntry[key] = nearest.current;
+        pEntry[key] = nearest.power;
+      } else {
+        vEntry[key] = cEntry[key] = pEntry[key] = null;
       }
-      entry[teamKey(teamId)] = bestDiff <= bucketMs ? bestVal : null;
     }
-    result.push(entry);
+    voltage.push(vEntry);
+    current.push(cEntry);
+    power.push(pEntry);
   }
-  return result;
+  return { voltage, current, power };
 }
 
 // ── Multi-team chart ──────────────────────────────────────────────────────────
@@ -142,7 +172,58 @@ const TOOLTIP_CONTENT_STYLE = {
   borderRadius: 8, fontSize: 12,
 };
 
-function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit }) {
+const PX_PER_BUCKET = 8;
+const MIN_CHART_WIDTH = 600;
+const OVERSCAN = 150;
+
+function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, unit, chartView, historyLoading, onLoadMore }) {
+  const scrollRef          = useRef(null);
+  const isAtEnd            = useRef(true);
+  const rafRef             = useRef(null);
+  const loadingMoreRef     = useRef(false);
+  const prevDataLenRef     = useRef(0);
+  const prevFirstLabelRef  = useRef(null);
+  const [scrollLeft, setScrollLeft] = useState(0);
+
+  useEffect(() => {
+    if (chartView !== "history") return;
+    const el = scrollRef.current;
+    if (!el || !mergedData.length) return;
+
+    const firstLabel = mergedData[0]?.timeLabel ?? null;
+    if (prevFirstLabelRef.current && firstLabel !== prevFirstLabelRef.current) {
+      // Data was prepended — shift right to keep the visible window stable.
+      const added = mergedData.length - prevDataLenRef.current;
+      el.scrollLeft += added * PX_PER_BUCKET;
+      setScrollLeft(el.scrollLeft);
+      loadingMoreRef.current = false;
+    } else if (isAtEnd.current) {
+      el.scrollLeft = el.scrollWidth;
+      setScrollLeft(el.scrollLeft);
+    }
+
+    prevFirstLabelRef.current = firstLabel;
+    prevDataLenRef.current    = mergedData.length;
+  }, [mergedData, chartView]);
+
+  useEffect(() => {
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, []);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isAtEnd.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
+
+    if (el.scrollLeft < 300 && onLoadMore && !loadingMoreRef.current) {
+      loadingMoreRef.current = true;
+      onLoadMore();
+    }
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => setScrollLeft(el.scrollLeft));
+  };
+
   if (selectedTeamIds.length === 0) {
     return (
       <div className="chart-empty">
@@ -151,78 +232,141 @@ function MultiTeamChart({ mergedData, selectedTeamIds, teamColors, teamNames, un
       </div>
     );
   }
+  if (chartView === "history" && historyLoading) {
+    return (
+      <div className="chart-empty">
+        <p>Loading history…</p>
+        <span>Fetching recorded frames</span>
+      </div>
+    );
+  }
   if (mergedData.length === 0) {
     return (
       <div className="chart-empty">
-        <p>Waiting for data stream</p>
-        <span>Start monitoring to see live data</span>
+        {chartView === "history" ? (
+          <>
+            <p>No history available</p>
+            <span>No recorded frames found for this event</span>
+          </>
+        ) : (
+          <>
+            <p>Waiting for data stream</p>
+            <span>Start monitoring to see live data</span>
+          </>
+        )}
       </div>
     );
   }
 
-  const allVals = mergedData.flatMap((d) =>
-    selectedTeamIds.map((id) => d[teamKey(id)]).filter((v) => v != null),
-  );
-  const min = allVals.length ? Math.min(...allVals) : 0;
-  const max = allVals.length ? Math.max(...allVals) : 1;
+  // Compute Y-axis domain from the full dataset so the axis stays stable while scrolling.
+  let minVal = Infinity, maxVal = -Infinity;
+  for (const d of mergedData) {
+    for (const id of selectedTeamIds) {
+      const v = d[teamKey(id)];
+      if (v != null) {
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+      }
+    }
+  }
+  const min = Number.isFinite(minVal) ? minVal : 0;
+  const max = Number.isFinite(maxVal) ? maxVal : 1;
   const spread = Math.max(max - min, 1);
-  // Keep the axis tight but add a small fixed margin so lines have breathing room.
   const pad = spread * 0.3;
   const domain = [
-    parseFloat((min - pad).toFixed(2)),
-    parseFloat((max + pad).toFixed(2)),
+    Number.parseFloat((min - pad).toFixed(2)),
+    Number.parseFloat((max + pad).toFixed(2)),
   ];
+
+  const sharedAxes = (
+    <>
+      <XAxis
+        dataKey="timeLabel"
+        tick={{ fill: "#6b7a99", fontSize: 11 }}
+        axisLine={{ stroke: "#1e2a3a" }}
+        tickLine={false}
+        interval="preserveStartEnd"
+        minTickGap={60}
+      />
+      <YAxis
+        domain={domain}
+        unit={unit}
+        tick={{ fill: "#6b7a99", fontSize: 11 }}
+        axisLine={false}
+        tickLine={false}
+        width={52}
+      />
+      <Tooltip
+        contentStyle={TOOLTIP_CONTENT_STYLE}
+        labelStyle={{ color: "#e8edf5" }}
+        itemStyle={{ color: "#e8edf5" }}
+        formatter={(v, name) => {
+          const teamId = Number(name.replace("t_", ""));
+          return [
+            v != null ? `${Number(v).toFixed(2)} ${unit}` : "—",
+            teamNames[teamId] ?? name,
+          ];
+        }}
+      />
+      <Legend
+        formatter={(name) => {
+          const teamId = Number(name.replace("t_", ""));
+          return teamNames[teamId] ?? name;
+        }}
+        wrapperStyle={{ fontSize: 12, color: "#6b7a99" }}
+      />
+      {selectedTeamIds.map((teamId) => (
+        <Line
+          key={teamId}
+          type="monotone"
+          dataKey={teamKey(teamId)}
+          stroke={teamColors[teamId]}
+          dot={false}
+          isAnimationActive={false}
+          strokeWidth={2}
+          connectNulls={false}
+        />
+      ))}
+    </>
+  );
+
+  if (chartView === "history") {
+    const totalWidth = Math.max(MIN_CHART_WIDTH, mergedData.length * PX_PER_BUCKET);
+    const containerWidth = scrollRef.current?.clientWidth ?? 800;
+    const visibleCount = Math.ceil(containerWidth / PX_PER_BUCKET);
+    const startIdx = Math.max(0, Math.floor(scrollLeft / PX_PER_BUCKET) - OVERSCAN);
+    const endIdx = Math.min(mergedData.length, startIdx + visibleCount + OVERSCAN * 2);
+    const windowedData = mergedData.slice(startIdx, endIdx);
+    const windowOffset = startIdx * PX_PER_BUCKET;
+    const windowWidth = Math.max(MIN_CHART_WIDTH, windowedData.length * PX_PER_BUCKET);
+
+    return (
+      <div
+        className="history-chart-scroll"
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{ position: "relative" }}
+      >
+        <div style={{ width: totalWidth, height: 220, position: "relative" }}>
+          <div style={{ position: "absolute", left: windowOffset }}>
+            <LineChart
+              width={windowWidth}
+              height={220}
+              data={windowedData}
+              margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+            >
+              {sharedAxes}
+            </LineChart>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ResponsiveContainer width="100%" height={220}>
       <LineChart data={mergedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <XAxis
-          dataKey="timeLabel"
-          tick={{ fill: "#6b7a99", fontSize: 11 }}
-          axisLine={{ stroke: "#1e2a3a" }}
-          tickLine={false}
-          interval="preserveStartEnd"
-        />
-        <YAxis
-          domain={domain}
-          unit={unit}
-          tick={{ fill: "#6b7a99", fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          width={52}
-        />
-        <Tooltip
-          contentStyle={TOOLTIP_CONTENT_STYLE}
-          labelStyle={{ color: "#e8edf5" }}
-          itemStyle={{ color: "#e8edf5" }}
-          formatter={(v, name) => {
-            // name is the dataKey string "t_123"; strip prefix to get teamId
-            const teamId = Number(name.replace("t_", ""));
-            return [
-              v != null ? `${Number(v).toFixed(2)} ${unit}` : "—",
-              teamNames[teamId] ?? name,
-            ];
-          }}
-        />
-        <Legend
-          formatter={(name) => {
-            const teamId = Number(name.replace("t_", ""));
-            return teamNames[teamId] ?? name;
-          }}
-          wrapperStyle={{ fontSize: 12, color: "#6b7a99" }}
-        />
-        {selectedTeamIds.map((teamId) => (
-          <Line
-            key={teamId}
-            type="monotone"
-            dataKey={teamKey(teamId)}
-            stroke={teamColors[teamId]}
-            dot={false}
-            isAnimationActive={false}
-            strokeWidth={2}
-            connectNulls={false}
-          />
-        ))}
+        {sharedAxes}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -234,6 +378,9 @@ MultiTeamChart.propTypes = {
   teamColors:      PropTypes.object.isRequired,
   teamNames:       PropTypes.object.isRequired,
   unit:            PropTypes.string.isRequired,
+  chartView:       PropTypes.string.isRequired,
+  historyLoading:  PropTypes.bool.isRequired,
+  onLoadMore:      PropTypes.func,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -353,20 +500,74 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
 
   // ── History data ──────────────────────────────────────────────────────────
   const [historyDataByTeam, setHistoryDataByTeam] = useState({});
+  const [historyLoading, setHistoryLoading]     = useState(false);
+  const historyHasMoreRef                        = useRef(true);
+  const historyLoadingMoreRef                    = useRef(false);
+  const historyOldestTsRef                       = useRef(null);
+
+  // Track the oldest timestamp across all teams so loadMoreHistory knows where to paginate from.
+  useEffect(() => {
+    let oldest = null;
+    for (const points of Object.values(historyDataByTeam)) {
+      if (points.length > 0) {
+        const ts = points[0].timestamp;
+        if (oldest === null || ts < oldest) oldest = ts;
+      }
+    }
+    historyOldestTsRef.current = oldest;
+  }, [historyDataByTeam]);
+
+  // Initial history load: last 500 frames per team in parallel.
   useEffect(() => {
     if (!eventId || teams.length === 0) return;
+    setHistoryLoading(true);
+    historyHasMoreRef.current    = true;
+    historyLoadingMoreRef.current = false;
+    const before = new Date().toISOString();
     Promise.all(
       teams.map((t) =>
-        fetchTeamFrames(t.team_id, { eventId, limit: 10000 })
-          .then((frames) => ({ teamId: t.team_id, points: expandFrames(frames) }))
-          .catch(() => ({ teamId: t.team_id, points: [] })),
+        fetchTeamFrames(t.team_id, { eventId, before, limit: 500 })
+          .then((frames) => ({ teamId: t.team_id, frames }))
+          .catch(() => ({ teamId: t.team_id, frames: [] })),
       ),
     ).then((results) => {
       const map = {};
-      for (const { teamId, points } of results) map[teamId] = points;
+      for (const { teamId, frames } of results) {
+        map[teamId] = expandFrames([...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+      }
+      if (results.every((r) => r.frames.length < 500)) historyHasMoreRef.current = false;
       setHistoryDataByTeam(map);
+      setHistoryLoading(false);
     });
   }, [eventId, teamIdsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Lazy-load older frames for all teams in parallel when the user scrolls left.
+  const loadMoreHistory = useCallback(async () => {
+    if (!historyHasMoreRef.current || historyLoadingMoreRef.current) return;
+    const before = historyOldestTsRef.current;
+    if (!before) return;
+    historyLoadingMoreRef.current = true;
+    const results = await Promise.all(
+      teams.map((t) =>
+        fetchTeamFrames(t.team_id, { eventId, before, limit: 500 })
+          .then((frames) => ({ teamId: t.team_id, frames }))
+          .catch(() => ({ teamId: t.team_id, frames: [] })),
+      ),
+    );
+    const anyNew = results.some((r) => r.frames.length > 0);
+    if (!anyNew || results.every((r) => r.frames.length < 500)) historyHasMoreRef.current = false;
+    if (anyNew) {
+      setHistoryDataByTeam((prev) => {
+        const next = { ...prev };
+        for (const { teamId, frames } of results) {
+          const sorted = [...frames].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          next[teamId] = [...expandFrames(sorted), ...(prev[teamId] ?? [])];
+        }
+        return next;
+      });
+    }
+    historyLoadingMoreRef.current = false;
+  }, [eventId, teams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Info for all selected teams ───────────────────────────────────────────
   // Map: teamId → { ecu, violations } | null (null = still loading)
@@ -415,37 +616,21 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
     });
   }
 
-  const selectedIds = [...selectedTeamIds];
+  const selectedIds = useMemo(() => [...selectedTeamIds], [selectedTeamIds]);
 
-  // ── Merged chart data ─────────────────────────────────────────────────────
-  const liveMergedVoltage = useMemo(
-    () => mergeForLiveChart(chartDataByTeam, selectedIds, "voltage"),
-    [chartDataByTeam, selectedTeamIds], // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Merged chart data — one pass covers all 3 channels ───────────────────
+  const liveMerged = useMemo(
+    () => mergeAllForLiveChart(chartDataByTeam, selectedIds),
+    [chartDataByTeam, selectedIds],
   );
-  const liveMergedCurrent = useMemo(
-    () => mergeForLiveChart(chartDataByTeam, selectedIds, "current"),
-    [chartDataByTeam, selectedTeamIds], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const liveMergedPower = useMemo(
-    () => mergeForLiveChart(chartDataByTeam, selectedIds, "power"),
-    [chartDataByTeam, selectedTeamIds], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const histMergedVoltage = useMemo(
-    () => mergeForHistoryChart(historyDataByTeam, selectedIds, "voltage"),
-    [historyDataByTeam, selectedTeamIds], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const histMergedCurrent = useMemo(
-    () => mergeForHistoryChart(historyDataByTeam, selectedIds, "current"),
-    [historyDataByTeam, selectedTeamIds], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const histMergedPower = useMemo(
-    () => mergeForHistoryChart(historyDataByTeam, selectedIds, "power"),
-    [historyDataByTeam, selectedTeamIds], // eslint-disable-line react-hooks/exhaustive-deps
+  const histMerged = useMemo(
+    () => mergeAllForHistoryChart(historyDataByTeam, selectedIds),
+    [historyDataByTeam, selectedIds],
   );
 
-  const voltageData = chartView === "live" ? liveMergedVoltage : histMergedVoltage;
-  const currentData = chartView === "live" ? liveMergedCurrent : histMergedCurrent;
-  const powerData   = chartView === "live" ? liveMergedPower   : histMergedPower;
+  const voltageData = chartView === "live" ? liveMerged.voltage : histMerged.voltage;
+  const currentData = chartView === "live" ? liveMerged.current : histMerged.current;
+  const powerData   = chartView === "live" ? liveMerged.power   : histMerged.power;
 
   if (teams.length === 0) return null;
 
@@ -518,6 +703,9 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="V"
+            chartView={chartView}
+            historyLoading={historyLoading}
+            onLoadMore={loadMoreHistory}
           />
         </div>
         <div className="chart-section">
@@ -528,6 +716,9 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="A"
+            chartView={chartView}
+            historyLoading={historyLoading}
+            onLoadMore={loadMoreHistory}
           />
         </div>
         <div className="chart-section">
@@ -538,6 +729,9 @@ export function AllTeamsOverview({ eventId, teams, ecuList }) {
             teamColors={teamColors}
             teamNames={teamNames}
             unit="W"
+            chartView={chartView}
+            historyLoading={historyLoading}
+            onLoadMore={loadMoreHistory}
           />
         </div>
       </div>

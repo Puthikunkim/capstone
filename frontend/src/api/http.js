@@ -25,9 +25,10 @@ export const fetchEcuHistory = (ecuId, { limit, teamId, before } = {}) => {
   return request(`/ecu/${ecuId}/history${qs ? `?${qs}` : ""}`);
 };
 
-export const fetchTeamFrames = (teamId, { eventId, limit } = {}) => {
+export const fetchTeamFrames = (teamId, { eventId, before, limit } = {}) => {
   const p = new URLSearchParams();
   if (eventId != null) p.set("event_id", eventId);
+  if (before != null) p.set("before", before);
   if (limit != null) p.set("limit", limit);
   const qs = p.toString();
   return request(`/teams/${teamId}/frames${qs ? `?${qs}` : ""}`);
