@@ -270,38 +270,26 @@ def compute_event_leaderboard(db: Session, event_id: int) -> EventLeaderboardRes
 
         is_live = bool(ecu.is_connected)
 
-        # Determine the measurement window
-        if p.start is not None:
-            window = min(
-                p.duration_seconds if p.duration_seconds is not None else MAX_LEADERBOARD_WINDOW_SECONDS,
-                MAX_LEADERBOARD_WINDOW_SECONDS,
-            )
-            start_utc = _to_utc(p.start)
-            end_utc = start_utc + timedelta(seconds=window)
-            frames = _frames_for_window(db, ecu.id, start_utc, end_utc)
-        else:
-            # No explicit timing — use the most recent 30 s of available frames
-            latest_frame = db.scalar(
-                select(EnergyFrame)
-                .where(EnergyFrame.ecu_id == ecu.id)
-                .order_by(EnergyFrame.timestamp.desc())
-                .limit(1)
-            )
-            if latest_frame is None:
-                pending.append(LeaderboardEntry(
-                    rank=None, team_id=team.id, team_name=team.name,
-                    ecu_id=ecu.id, mac_address=ecu.mac_address,
-                    energy_wh=None, avg_power_watts=None,
-                    duration_seconds=None, frame_count=0,
-                    status=LeaderboardStatus.PENDING,
-                    is_live=is_live,
-                    last_reading_at=None,
-                ))
-                continue
+        # No start time → pending, not scored
+        if p.start is None:
+            pending.append(LeaderboardEntry(
+                rank=None, team_id=team.id, team_name=team.name,
+                ecu_id=ecu.id, mac_address=ecu.mac_address,
+                energy_wh=None, avg_power_watts=None,
+                duration_seconds=None, frame_count=0,
+                status=LeaderboardStatus.PENDING,
+                is_live=is_live,
+                last_reading_at=None,
+            ))
+            continue
 
-            end_utc = _to_utc(latest_frame.timestamp)
-            start_utc = end_utc - timedelta(seconds=MAX_LEADERBOARD_WINDOW_SECONDS)
-            frames = _frames_for_window(db, ecu.id, start_utc, end_utc)
+        window = min(
+            p.duration_seconds if p.duration_seconds is not None else MAX_LEADERBOARD_WINDOW_SECONDS,
+            MAX_LEADERBOARD_WINDOW_SECONDS,
+        )
+        start_utc = _to_utc(p.start)
+        end_utc = start_utc + timedelta(seconds=window)
+        frames = _frames_for_window(db, ecu.id, start_utc, end_utc)
 
         if not frames:
             pending.append(LeaderboardEntry(
