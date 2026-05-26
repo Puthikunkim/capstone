@@ -24,6 +24,7 @@ from app.schemas.scoring import (
 )
 
 MAX_LEADERBOARD_WINDOW_SECONDS = 30.0
+MAX_OPEN_WINDOW_SECONDS = 3600.0  # cap for start-only (no duration) entries
 
 
 @dataclass(slots=True)
@@ -239,16 +240,70 @@ def _frames_for_window(
     ).all())
 
 
+def _score_participant(
+    db: Session,
+    p: EventParticipant,
+    team: Team,
+    ecu: ECU,
+) -> tuple[LeaderboardEntry, bool]:
+    """Return (entry, is_scored) for one participant. is_scored=False means pending."""
+    is_live = bool(ecu.is_connected)
+
+    def _pending() -> LeaderboardEntry:
+        return LeaderboardEntry(
+            rank=None, team_id=team.id, team_name=team.name,
+            ecu_id=ecu.id, mac_address=ecu.mac_address,
+            energy_wh=None, avg_power_watts=None,
+            duration_seconds=None, frame_count=0,
+            status=LeaderboardStatus.PENDING,
+            is_live=is_live,
+            last_reading_at=None,
+        )
+
+    if p.start is None:
+        return _pending(), False
+
+    start_utc = _to_utc(p.start)
+    if p.duration_seconds is not None:
+        end_utc = start_utc + timedelta(seconds=min(p.duration_seconds, MAX_LEADERBOARD_WINDOW_SECONDS))
+    else:
+        end_utc = min(
+            datetime.now(timezone.utc),
+            start_utc + timedelta(seconds=MAX_OPEN_WINDOW_SECONDS),
+        )
+
+    frames = _frames_for_window(db, ecu.id, start_utc, end_utc)
+    if not frames:
+        return _pending(), False
+
+    energy_wh = _integrated_energy_wh(frames)
+    avg_power = sum(_frame_mean_power(f) for f in frames) / len(frames)
+    actual_duration = max(
+        0.0,
+        (_to_utc(frames[-1].timestamp) - _to_utc(frames[0].timestamp)).total_seconds(),
+    )
+    return LeaderboardEntry(
+        rank=None, team_id=team.id, team_name=team.name,
+        ecu_id=ecu.id, mac_address=ecu.mac_address,
+        energy_wh=round(energy_wh, 4),
+        avg_power_watts=round(avg_power, 2),
+        duration_seconds=round(actual_duration, 1),
+        frame_count=len(frames),
+        status=LeaderboardStatus.SCORED,
+        is_live=is_live,
+        last_reading_at=_to_utc(frames[-1].timestamp),
+    ), True
+
+
 def compute_event_leaderboard(db: Session, event_id: int) -> EventLeaderboardResponse:
-    """Rank teams by integrated energy over each team's measurement window (≤ 30 s).
+    """Rank teams by integrated energy over each team's measurement window.
 
     Window source:
-      - EventParticipant has start + duration → use that (capped at 30 s)
-      - No explicit timing → use the most recent 30 s of ECU frames
+      - start + duration set → fixed window capped at 30 s (stable rank)
+      - start only → [start, now] capped at 1 hour (live, rank updates each poll)
+      - no start → pending, unranked
 
-    Teams with no ECU are excluded.
-    Teams with ECU but no frames appear as PENDING.
-    Any team with at least one frame gets a SCORED entry.
+    Teams with no ECU are excluded entirely.
     """
     participants = list(db.scalars(
         select(EventParticipant).where(EventParticipant.event_id == event_id)
@@ -261,81 +316,13 @@ def compute_event_leaderboard(db: Session, event_id: int) -> EventLeaderboardRes
         team = db.get(Team, p.team_id)
         if team is None:
             continue
-
         ecu = db.scalar(select(ECU).where(ECU.team_id == p.team_id).limit(1))
-
-        # No ECU → exclude entirely
         if ecu is None:
             continue
 
-        is_live = bool(ecu.is_connected)
+        entry, is_scored = _score_participant(db, p, team, ecu)
+        (scored if is_scored else pending).append(entry)
 
-        # Determine the measurement window
-        if p.start is not None:
-            window = min(
-                p.duration_seconds if p.duration_seconds is not None else MAX_LEADERBOARD_WINDOW_SECONDS,
-                MAX_LEADERBOARD_WINDOW_SECONDS,
-            )
-            start_utc = _to_utc(p.start)
-            end_utc = start_utc + timedelta(seconds=window)
-            frames = _frames_for_window(db, ecu.id, start_utc, end_utc)
-        else:
-            # No explicit timing — use the most recent 30 s of available frames
-            latest_frame = db.scalar(
-                select(EnergyFrame)
-                .where(EnergyFrame.ecu_id == ecu.id)
-                .order_by(EnergyFrame.timestamp.desc())
-                .limit(1)
-            )
-            if latest_frame is None:
-                pending.append(LeaderboardEntry(
-                    rank=None, team_id=team.id, team_name=team.name,
-                    ecu_id=ecu.id, mac_address=ecu.mac_address,
-                    energy_wh=None, avg_power_watts=None,
-                    duration_seconds=None, frame_count=0,
-                    status=LeaderboardStatus.PENDING,
-                    is_live=is_live,
-                    last_reading_at=None,
-                ))
-                continue
-
-            end_utc = _to_utc(latest_frame.timestamp)
-            start_utc = end_utc - timedelta(seconds=MAX_LEADERBOARD_WINDOW_SECONDS)
-            frames = _frames_for_window(db, ecu.id, start_utc, end_utc)
-
-        if not frames:
-            pending.append(LeaderboardEntry(
-                rank=None, team_id=team.id, team_name=team.name,
-                ecu_id=ecu.id, mac_address=ecu.mac_address,
-                energy_wh=None, avg_power_watts=None,
-                duration_seconds=None, frame_count=0,
-                status=LeaderboardStatus.PENDING,
-                is_live=is_live,
-                last_reading_at=None,
-            ))
-            continue
-
-        energy_wh = _integrated_energy_wh(frames)
-        avg_power = sum(_frame_mean_power(f) for f in frames) / len(frames)
-        actual_duration = max(
-            0.0,
-            (_to_utc(frames[-1].timestamp) - _to_utc(frames[0].timestamp)).total_seconds(),
-        )
-        last_reading_at = _to_utc(frames[-1].timestamp)
-
-        scored.append(LeaderboardEntry(
-            rank=None, team_id=team.id, team_name=team.name,
-            ecu_id=ecu.id, mac_address=ecu.mac_address,
-            energy_wh=round(energy_wh, 4),
-            avg_power_watts=round(avg_power, 2),
-            duration_seconds=round(actual_duration, 1),
-            frame_count=len(frames),
-            status=LeaderboardStatus.SCORED,
-            is_live=is_live,
-            last_reading_at=last_reading_at,
-        ))
-
-    # Lower energy = more efficient = better rank
     scored.sort(key=lambda e: (e.energy_wh, e.team_name))
     rank = 0
     prev: float | None = None

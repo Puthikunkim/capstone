@@ -247,6 +247,7 @@ def get_frames_for_team(
 	db: Session,
 	team_id: int,
 	event_id: int | None = None,
+	before: datetime | None = None,
 	limit: int | None = 100,
 ) -> list[EnergyFrame]:
 	# Include frames that have team_id set, plus frames from ECUs currently
@@ -257,7 +258,6 @@ def get_frames_for_team(
 		.where(
 			(EnergyFrame.team_id == team_id) | (EnergyFrame.ecu_id.in_(ecu_ids))
 		)
-		.order_by(EnergyFrame.timestamp.asc())
 	)
 
 	if event_id is not None:
@@ -277,7 +277,17 @@ def get_frames_for_team(
 			end = participant.start + timedelta(seconds=participant.duration_seconds)
 			stmt = stmt.where(EnergyFrame.timestamp <= _to_utc(end))
 
+	if before is not None:
+		# Fetch the N most recent frames strictly before `before`, returned in chronological order.
+		stmt = stmt.where(EnergyFrame.timestamp < _to_utc(before))
+		stmt = stmt.order_by(EnergyFrame.timestamp.desc())
+		if limit is not None:
+			stmt = stmt.limit(max(0, limit))
+		frames = list(db.scalars(stmt).all())
+		frames.reverse()
+		return frames
+
+	stmt = stmt.order_by(EnergyFrame.timestamp.asc())
 	if limit is not None:
 		stmt = stmt.limit(max(0, limit))
-
 	return list(db.scalars(stmt).all())

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 import { fetchEventLeaderboard } from "../api/http";
+import { AllTeamsOverview } from "../components/AllTeamsOverview";
 
 const EVENT_LABELS = {
   drag_race: "Drag Race",
@@ -42,7 +43,7 @@ function fmtTimestamp(iso) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-export function LeaderboardPage({ eventId, eventType }) {
+export function LeaderboardPage({ eventId, eventType, ecuList = [] }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -70,6 +71,7 @@ export function LeaderboardPage({ eventId, eventType }) {
 
   const scored  = data?.entries.filter((e) => e.status === "scored") ?? [];
   const pending = data?.entries.filter((e) => e.status !== "scored") ?? [];
+  const allTeams = data?.entries ?? [];
 
   return (
     <div className="lb-page">
@@ -159,6 +161,12 @@ export function LeaderboardPage({ eventId, eventType }) {
           </div>
         </div>
       )}
+      {allTeams.length > 0 && (
+        <AllTeamsOverview
+          teams={allTeams}
+          ecuList={ecuList}
+        />
+      )}
     </div>
   );
 }
@@ -166,4 +174,5 @@ export function LeaderboardPage({ eventId, eventType }) {
 LeaderboardPage.propTypes = {
   eventId:   PropTypes.number.isRequired,
   eventType: PropTypes.string,
+  ecuList:   PropTypes.array,
 };

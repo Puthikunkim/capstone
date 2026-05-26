@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import PropTypes from "prop-types";
 import { TelemetryChart, HistoryChart } from "../components/TelemetryChart";
 import { useTeamWebSocket } from "../hooks/useWebSocket";
@@ -8,9 +8,14 @@ import {
   fetchTeamFrames,
   fetchViolations,
   configureEcu,
-  uploadFirmware,
-  fetchFirmwareStatus,
 } from "../api/http";
+
+// Ensure a server timestamp string is treated as UTC.
+// The backend omits the Z suffix, so without this browsers parse it as local time.
+function ensureUtc(ts) {
+  if (!ts) return ts;
+  return ts.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(ts) ? ts : ts + 'Z';
+}
 
 // Expand a single frame's samples into individual time-stamped points.
 // The last sample gets the frame's timestamp; earlier samples are spread
@@ -21,8 +26,8 @@ function expandSingleFrame(frame, prevTimestamp) {
   const n = Math.max(voltages.length, currents.length);
   if (n === 0) return [];
 
-  const tEnd = new Date(frame.timestamp).getTime();
-  const tStart = prevTimestamp ? new Date(prevTimestamp).getTime() : tEnd;
+  const tEnd = new Date(ensureUtc(frame.timestamp)).getTime();
+  const tStart = prevTimestamp ? new Date(ensureUtc(prevTimestamp)).getTime() : tEnd;
 
   return Array.from({ length: n }, (_, j) => {
     const v = voltages[j] ?? null;
@@ -138,7 +143,7 @@ AlertItem.propTypes = {
 
 function toLocalInput(utcIso) {
   if (!utcIso) return "";
-  const d = new Date(utcIso);
+  const d = new Date(ensureUtc(utcIso));
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -279,7 +284,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const energyAccRef = useRef(0);         // running energy total (Wh)
   const lastEnergyPointRef = useRef(null); // last sample point used in integration
   const [totalEnergyWh, setTotalEnergyWh] = useState(null);
+  const [lastFrameAvgVoltage, setLastFrameAvgVoltage] = useState(null);
   const [lastFrameAvgCurrent, setLastFrameAvgCurrent] = useState(null);
+  const [lastFrameAvgPower, setLastFrameAvgPower] = useState(null);
 
   // Config form state
   const [configForm, setConfigForm] = useState({
@@ -291,14 +298,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState(null);
   const [configSuccess, setConfigSuccess] = useState(false);
-
-  // Firmware upload state
-  const [firmwareFile, setFirmwareFile] = useState(null);
-  const [firmwareFileError, setFirmwareFileError] = useState(null);
-  const [firmwareUploading, setFirmwareUploading] = useState(false);
-  const [firmwareStatus, setFirmwareStatus] = useState(null);
-  const [firmwareError, setFirmwareError] = useState(null);
-  const firmwareInputRef = useRef(null);
 
   // Mirror historyPoints[0].timestamp in a ref so loadMoreHistory stays stable.
   const historyOldestTsRef = useRef(null);
@@ -338,10 +337,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
 
     setConfigError(null);
     setConfigSuccess(false);
-    setFirmwareStatus(null);
-    setFirmwareError(null);
-    setFirmwareFile(null);
-    setFirmwareFileError(null);
 
     fetchEcu(selectedEcuId)
       .then((ecu) => {
@@ -359,9 +354,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       .then(setViolations)
       .catch(() => setViolations([]));
 
-    fetchFirmwareStatus(selectedEcuId)
-      .then(setFirmwareStatus)
-      .catch(() => {});
   }, [selectedEcuId]);
 
   // Fetch chart data when ECU/team/participant timing changes
@@ -373,7 +365,9 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
       energyAccRef.current = 0;
       lastEnergyPointRef.current = null;
       setTotalEnergyWh(null);
+      setLastFrameAvgVoltage(null);
       setLastFrameAvgCurrent(null);
+      setLastFrameAvgPower(null);
       setVoltageView("live");
       setCurrentView("live");
       setPowerView("live");
@@ -386,14 +380,16 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     energyAccRef.current = 0;
     lastEnergyPointRef.current = null;
     setTotalEnergyWh(null);
+    setLastFrameAvgVoltage(null);
     setLastFrameAvgCurrent(null);
+    setLastFrameAvgPower(null);
     setVoltageView("live");
     setCurrentView("live");
     setPowerView("live");
 
-    const hasTimeRange = participant?.start != null && participant?.duration_seconds != null;
+    const eventTimeRange = participant?.start != null && participant?.duration_seconds != null;
 
-    if (hasTimeRange) {
+    if (eventTimeRange) {
       // Start+duration set: show team frames within the event time window
       fetchTeamFrames(teamId, { eventId: participant.event_id, limit: 10000 })
         .then((frames) => {
@@ -407,8 +403,14 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           setHistoryPoints(expanded);
           setChartData(expanded.slice(-1000));
           const lastFrame = sorted[sorted.length - 1];
-          const samples = lastFrame?.current_samples;
-          if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
+          const vSamples = lastFrame?.voltage_samples;
+          const cSamples = lastFrame?.current_samples;
+          if (vSamples?.length) setLastFrameAvgVoltage(vSamples.reduce((a, b) => a + b, 0) / vSamples.length);
+          if (cSamples?.length) setLastFrameAvgCurrent(cSamples.reduce((a, b) => a + b, 0) / cSamples.length);
+          if (vSamples?.length && cSamples?.length) {
+            const n = Math.min(vSamples.length, cSamples.length);
+            setLastFrameAvgPower(vSamples.slice(0, n).reduce((sum, v, i) => sum + v * cSamples[i], 0) / n);
+          }
         })
         .catch(() => {});
     } else {
@@ -432,8 +434,14 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
           setHistoryPoints(expandedHist);
           if (histFrames.length < 500) historyHasMoreRef.current = false;
           const lastFrame = sortedLive[sortedLive.length - 1];
-          const samples = lastFrame?.current_samples;
-          if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
+          const vSamples = lastFrame?.voltage_samples;
+          const cSamples = lastFrame?.current_samples;
+          if (vSamples?.length) setLastFrameAvgVoltage(vSamples.reduce((a, b) => a + b, 0) / vSamples.length);
+          if (cSamples?.length) setLastFrameAvgCurrent(cSamples.reduce((a, b) => a + b, 0) / cSamples.length);
+          if (vSamples?.length && cSamples?.length) {
+            const n = Math.min(vSamples.length, cSamples.length);
+            setLastFrameAvgPower(vSamples.slice(0, n).reduce((sum, v, i) => sum + v * cSamples[i], 0) / n);
+          }
         })
         .catch(() => {});
     }
@@ -458,8 +466,14 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     const prevTs = lastFrameTsRef.current;
     lastFrameTsRef.current = liveData.timestamp;
     const newPoints = expandSingleFrame(liveData, prevTs);
-    const samples = liveData.current_samples;
-    if (samples?.length) setLastFrameAvgCurrent(samples.reduce((a, b) => a + b, 0) / samples.length);
+    const vSamples = liveData.voltage_samples;
+    const cSamples = liveData.current_samples;
+    if (vSamples?.length) setLastFrameAvgVoltage(vSamples.reduce((a, b) => a + b, 0) / vSamples.length);
+    if (cSamples?.length) setLastFrameAvgCurrent(cSamples.reduce((a, b) => a + b, 0) / cSamples.length);
+    if (vSamples?.length && cSamples?.length) {
+      const n = Math.min(vSamples.length, cSamples.length);
+      setLastFrameAvgPower(vSamples.slice(0, n).reduce((sum, v, i) => sum + v * cSamples[i], 0) / n);
+    }
 
     // Integrate only the delta: [last known point, ...new points]
     const anchor = lastEnergyPointRef.current;
@@ -481,6 +495,18 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   useEffect(() => {
     historyOldestTsRef.current = historyPoints[0]?.timestamp ?? null;
   }, [historyPoints]);
+
+  const hasTimeRange = participant?.start != null && participant?.duration_seconds != null;
+
+  const filteredHistoryPoints = useMemo(() => {
+    if (!hasTimeRange) return historyPoints;
+    const startMs = new Date(ensureUtc(participant.start)).getTime();
+    const endMs = startMs + participant.duration_seconds * 1000;
+    return historyPoints.filter((p) => {
+      const t = new Date(p.timestamp).getTime();
+      return t >= startMs && t <= endMs;
+    });
+  }, [historyPoints, hasTimeRange, participant?.start, participant?.duration_seconds]);
 
   // ── Config form ──────────────────────────────────────────────────
 
@@ -515,42 +541,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
     },
     [selectedEcuId, configForm]
   );
-
-  // ── Firmware upload ──────────────────────────────────────────────
-
-  const handleFirmwareFileChange = (e) => {
-    const file = e.target.files?.[0];
-    setFirmwareFileError(null);
-    setFirmwareError(null);
-
-    if (!file) {
-      setFirmwareFile(null);
-      return;
-    }
-    if (!file.name.endsWith(".bin")) {
-      setFirmwareFileError("Only .bin firmware files are accepted.");
-      setFirmwareFile(null);
-      e.target.value = "";
-      return;
-    }
-    setFirmwareFile(file);
-  };
-
-  const handleFirmwareUpload = useCallback(async () => {
-    if (!firmwareFile || !selectedEcuId) return;
-    setFirmwareUploading(true);
-    setFirmwareError(null);
-    try {
-      const result = await uploadFirmware(selectedEcuId, firmwareFile);
-      setFirmwareStatus(result);
-      setFirmwareFile(null);
-      if (firmwareInputRef.current) firmwareInputRef.current.value = "";
-    } catch (err) {
-      setFirmwareError(err.message);
-    } finally {
-      setFirmwareUploading(false);
-    }
-  }, [firmwareFile, selectedEcuId]);
 
   // ── Render: error state ──────────────────────────────────────────
 
@@ -600,12 +590,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
   const classLabel = ecuData?.vehicle_class ?? "--";
 
   const lastSample = chartData.length > 0 ? chartData[chartData.length - 1] : null;
-
-  // Flash display — show raw KB value, or "--" if unknown
-  const flashDisplay = ecuData?.flash_usage != null
-    ? `${Math.round(ecuData.flash_usage / 1024)} KB`
-    : "--";
-
 
   return (
     <div className="dashboard">
@@ -672,10 +656,10 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Voltage"
-          value={ecuIsConnected ? lastSample?.voltage?.toFixed(2) : "-"}
+          value={ecuIsConnected ? lastFrameAvgVoltage?.toFixed(2) : "-"}
           unit="V"
-          sub={ecuIsConnected && lastSample ? <><span className="stable-dot" /> Stable</> : "No data"}
-          subStyle={ecuIsConnected && lastSample ? "sub-stable" : "sub-muted"}
+          sub={ecuIsConnected && lastFrameAvgVoltage != null ? <><span className="stable-dot" /> Stable</> : "No data"}
+          subStyle={ecuIsConnected && lastFrameAvgVoltage != null ? "sub-stable" : "sub-muted"}
         />
         <StatCard
           icon={
@@ -698,17 +682,11 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </svg>
           }
           label="Power Consumption"
-          value={
-            ecuIsConnected
-              ? lastSample?.voltage != null && lastSample?.current != null
-                ? (lastSample.voltage * lastSample.current).toFixed(2)
-                : null
-              : "-"
-          }
+          value={ecuIsConnected ? lastFrameAvgPower?.toFixed(2) : "-"}
           unit="W"
           sub={
-            ecuIsConnected && lastSample?.voltage != null && lastSample?.current != null
-              ? (lastSample.voltage * lastSample.current) >= 0 ? "Discharging" : "Charging"
+            ecuIsConnected && lastFrameAvgPower != null
+              ? lastFrameAvgPower >= 0 ? "Discharging" : "Charging"
               : "No data"
           }
           subStyle="sub-muted"
@@ -766,12 +744,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             )
           ) : (
             <HistoryChart
-              data={historyPoints}
+              data={filteredHistoryPoints}
               dataKey="voltage"
               color="#00c6ff"
               unit="V"
               label="Voltage"
-              onLoadMore={loadMoreHistory}
+              onLoadMore={hasTimeRange ? undefined : loadMoreHistory}
             />
           )}
         </div>
@@ -811,12 +789,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             )
           ) : (
             <HistoryChart
-              data={historyPoints}
+              data={filteredHistoryPoints}
               dataKey="current"
               color="#f59e0b"
               unit="A"
               label="Current"
-              onLoadMore={loadMoreHistory}
+              onLoadMore={hasTimeRange ? undefined : loadMoreHistory}
             />
           )}
         </div>
@@ -856,12 +834,12 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             )
           ) : (
             <HistoryChart
-              data={historyPoints}
+              data={filteredHistoryPoints}
               dataKey="power"
               color="#10b981"
               unit="W"
               label="Power"
-              onLoadMore={loadMoreHistory}
+              onLoadMore={hasTimeRange ? undefined : loadMoreHistory}
             />
           )}
         </div>
@@ -978,68 +956,6 @@ export function Dashboard({ selectedEcuId, teamId, backendError, teamName, onCre
             </button>
           </form>
 
-          {/* Firmware Upload */}
-          <div className="firmware-section">
-            <div className="firmware-header">
-              <span className="card-title">Firmware Update</span>
-              {firmwareStatus && (
-                <span className={`firmware-status-badge ${firmwareStatus.status}`}>
-                  {firmwareStatus.status}
-                </span>
-              )}
-            </div>
-
-            <div className="firmware-upload-row">
-              <label className="file-input-label">
-                <input
-                  ref={firmwareInputRef}
-                  type="file"
-                  accept=".bin"
-                  onChange={handleFirmwareFileChange}
-                  className="file-input-hidden"
-                />
-                <span className="file-input-text">
-                  {firmwareFile ? firmwareFile.name : "Choose .bin file…"}
-                </span>
-                <span className="file-input-btn">Browse</span>
-              </label>
-              <button
-                className="btn-primary"
-                onClick={handleFirmwareUpload}
-                disabled={!firmwareFile || firmwareUploading}
-              >
-                {firmwareUploading ? "Uploading…" : "Upload"}
-              </button>
-            </div>
-
-            {firmwareFileError && (
-              <div className="form-feedback error">{firmwareFileError}</div>
-            )}
-            {firmwareError && (
-              <div className="form-feedback error">{firmwareError}</div>
-            )}
-            {firmwareStatus?.filename && (
-              <div className="firmware-info">
-                <span>Last: {firmwareStatus.filename}</span>
-                {firmwareStatus.progress > 0 && firmwareStatus.progress < 100 && (
-                  <div className="firmware-progress-bar">
-                    <div
-                      className="firmware-progress-fill"
-                      style={{ width: `${firmwareStatus.progress}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flash-row">
-              <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
-                <rect x="2" y="4" width="12" height="8" rx="1" stroke="currentColor" strokeWidth="1.3" />
-                <path d="M5 4V3M11 4V3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-              </svg>
-              <span>Flash memory usage: {flashDisplay}</span>
-            </div>
-          </div>
         </div>
 
         {/* System Alerts */}

@@ -25,9 +25,10 @@ export const fetchEcuHistory = (ecuId, { limit, teamId, before } = {}) => {
   return request(`/ecu/${ecuId}/history${qs ? `?${qs}` : ""}`);
 };
 
-export const fetchTeamFrames = (teamId, { eventId, limit } = {}) => {
+export const fetchTeamFrames = (teamId, { eventId, before, limit } = {}) => {
   const p = new URLSearchParams();
   if (eventId != null) p.set("event_id", eventId);
+  if (before != null) p.set("before", before);
   if (limit != null) p.set("limit", limit);
   const qs = p.toString();
   return request(`/teams/${teamId}/frames${qs ? `?${qs}` : ""}`);
@@ -94,21 +95,3 @@ export const fetchAlerts = ({ ecuId, start, limit = 50 } = {}) => {
   return request(`/alerts/?${p.toString()}`);
 };
 
-// ── Firmware ──────────────────────────────────────────────────────────
-export const fetchFirmwareStatus = (ecuId) =>
-  request(`/${ecuId}/firmware/status`);
-
-export async function uploadFirmware(ecuId, file) {
-  const form = new FormData();
-  form.append("file", file);
-  const response = await fetch(`${API_BASE}/${ecuId}/firmware`, {
-    method: "POST",
-    body: form,
-    // No Content-Type header — browser sets it with the boundary automatically
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.detail || `${response.status} ${response.statusText}`);
-  }
-  return response.json();
-}

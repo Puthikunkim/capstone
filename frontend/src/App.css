@@ -22,10 +22,41 @@
   --text-primary:   #e8edf5;
   --text-secondary: #6b7a99;
   --text-muted:     #3d4f6a;
+  --bg-navbar:      #0d1220;
   --sidebar-w:      232px;
   --navbar-h:       52px;
   --radius:         10px;
   --radius-sm:      6px;
+}
+
+:root.light {
+  --bg-deep:        #f0f4f8;
+  --bg-surface:     #ffffff;
+  --bg-card:        #f8fafc;
+  --bg-input:       #f1f5f9;
+  --bg-navbar:      #0f172a;
+  --border:         #e2e8f0;
+  --border-light:   #cbd5e1;
+  --accent:         #0284c7;
+  --accent-dim:     rgba(2, 132, 199, 0.10);
+  --accent-glow:    rgba(2, 132, 199, 0.20);
+  --gray-dim:       rgba(0, 0, 0, 0.04);
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+}
+
+:root.light .navbar .icon-btn,
+:root.light .navbar .navbar-back-btn,
+:root.light .competitions-topbar .icon-btn {
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+:root.light .navbar .icon-btn:hover,
+:root.light .navbar .navbar-back-btn:hover,
+:root.light .competitions-topbar .icon-btn:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 html, body, #root { height: 100%; }
@@ -45,7 +76,7 @@ body {
 /* ── Navbar ──────────────────────────────────────────────────────── */
 .navbar {
   height: var(--navbar-h);
-  background: var(--bg-surface);
+  background: var(--bg-navbar);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -179,17 +210,7 @@ body {
 
 .ecu-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .ecu-dot.connected    { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.ecu-dot.lost         { background: var(--orange); }
-.ecu-dot.disconnected { background: var(--text-muted); }
-.ecu-dot.violation    {
-  background: var(--red);
-  box-shadow: 0 0 6px var(--red);
-  animation: violation-pulse 1s ease-in-out infinite;
-}
-@keyframes violation-pulse {
-  0%, 100% { box-shadow: 0 0 4px var(--red); }
-  50%       { box-shadow: 0 0 10px var(--red), 0 0 18px rgba(239,68,68,0.5); }
-}
+.ecu-dot.disconnected { background: var(--red); box-shadow: 0 0 6px var(--red); }
 
 .ecu-flash-value {
   display: flex; align-items: center; gap: 3px;
@@ -351,6 +372,31 @@ body {
   border-radius: 2px;
 }
 
+/* Shared multi-team history scrollbar — full-size, clearly visible */
+.overview-hist-scrollbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  margin-top: 8px;
+  scrollbar-width: auto;
+  scrollbar-color: var(--accent, #00c6ff) var(--surface-2, #1e2a3a);
+}
+
+.overview-hist-scrollbar::-webkit-scrollbar {
+  height: 12px;
+}
+
+.overview-hist-scrollbar::-webkit-scrollbar-track {
+  background: var(--surface-2, #1e2a3a);
+  border-radius: 6px;
+}
+
+.overview-hist-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--accent, #00c6ff);
+  border-radius: 6px;
+  border: 2px solid var(--surface-2, #1e2a3a);
+}
+
 /* Telemetry chart */
 .telemetry-chart { display: flex; flex-direction: column; gap: 10px; }
 
@@ -438,8 +484,10 @@ body {
   outline: none;
   width: 100%;
   transition: border-color 0.15s;
+  color-scheme: dark;
 }
 .form-input:focus { border-color: var(--accent); }
+.form-input::-webkit-calendar-picker-indicator { cursor: pointer; }
 .form-input.readonly { color: var(--text-secondary); cursor: default; }
 .form-input option { background: var(--bg-card); }
 
@@ -466,60 +514,6 @@ body {
 .btn-primary:not(:disabled):hover { opacity: 0.88; }
 .btn-primary.full-width { width: 100%; }
 
-/* ── Firmware section ────────────────────────────────────────────── */
-.firmware-section {
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-  display: flex; flex-direction: column; gap: 10px;
-}
-
-.firmware-header { display: flex; align-items: center; justify-content: space-between; }
-
-.firmware-status-badge {
-  font-size: 11px; font-weight: 600;
-  padding: 2px 8px; border-radius: 20px;
-  text-transform: capitalize;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-.firmware-status-badge.success { color: var(--green); border-color: rgba(34,197,94,0.3); background: var(--green-dim); }
-.firmware-status-badge.failed  { color: var(--red);   border-color: rgba(239,68,68,0.3); background: var(--red-dim); }
-
-.firmware-upload-row { display: flex; gap: 8px; }
-
-.file-input-label {
-  flex: 1;
-  display: flex; align-items: center;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  cursor: pointer;
-}
-.file-input-hidden { display: none; }
-.file-input-text {
-  flex: 1; padding: 8px 10px;
-  font-size: 12px; color: var(--text-secondary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.file-input-btn {
-  background: var(--border);
-  padding: 8px 12px;
-  font-size: 12px; font-weight: 600; color: var(--text-primary);
-  white-space: nowrap;
-}
-
-.firmware-info { font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 6px; }
-
-.firmware-progress-bar {
-  height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
-}
-.firmware-progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
-
-.flash-row {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--text-muted);
-}
 
 /* ── Alerts card ─────────────────────────────────────────────────── */
 .alerts-icon { color: var(--yellow); }
@@ -632,7 +626,7 @@ body {
 
 .competitions-topbar {
   height: var(--navbar-h);
-  background: var(--bg-surface);
+  background: var(--bg-navbar);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;
@@ -1651,3 +1645,224 @@ body {
 
 .lb-row--live { background: rgba(34,197,94,.04); }
 .lb-row--live:hover { background: rgba(34,197,94,.07); }
+
+/* ── All-Teams Overview ──────────────────────────────────────────────────── */
+.lb-overview-section {
+  margin-top: 32px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.lb-overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Team filter chip row */
+.overview-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overview-filter-preset {
+  background: var(--gray-dim);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.overview-filter-preset:hover {
+  background: var(--border);
+  color: var(--text-primary);
+}
+
+.overview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.team-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px 4px 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  opacity: 0.45;
+}
+.team-chip:hover {
+  opacity: 0.75;
+  color: var(--text-primary);
+}
+/* Selected = included in chart: show the team's color on border + fill */
+.team-chip--selected {
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+  color: var(--text-primary);
+  border-color: var(--chip-color, var(--border-light));
+  opacity: 1;
+}
+/* Active = info panel team: extra glow ring */
+.team-chip--active {
+  box-shadow: 0 0 0 2px var(--chip-color, var(--accent));
+}
+
+.team-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Charts stack */
+.overview-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Team info panels — one per selected team, stacked vertically */
+.overview-info-panels-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.overview-info-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--team-color, var(--accent));
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 280px;
+  min-width: 260px;
+}
+
+.overview-info-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.overview-info-team-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.overview-info-team-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.overview-info-loading {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.overview-info-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.overview-info-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.overview-info-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.overview-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.overview-info-mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* Violations sub-section */
+.overview-violations-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.overview-violations-count {
+  background: var(--red-dim);
+  color: var(--red);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+}
+
+.overview-violations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.overview-violation-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.overview-violation-time {
+  color: var(--text-secondary);
+  font-family: monospace;
+  min-width: 80px;
+}
+
+.overview-violation-power {
+  color: var(--red);
+  font-weight: 600;
+  min-width: 70px;
+}
