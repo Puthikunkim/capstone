@@ -7,8 +7,7 @@ const EVENT_LABELS = {
   endurance_efficiency: "Endurance & Efficiency",
 };
 
-export function Navbar({ connectedCount = 0, totalCount = 0, competition, selectedEvent, onBack, onTogglePanel, unreadCount, isDark, onToggleTheme }) {
-  const healthPct = totalCount > 0 ? Math.round((connectedCount / totalCount) * 100) : 100;
+export function Navbar({ competition, selectedEvent, onBack, onTogglePanel, unreadCount, isDark, onToggleTheme }) {
   const badgeEvents = selectedEvent ? [selectedEvent] : (competition?.events ?? []);
 
   return (
@@ -69,8 +68,6 @@ export function Navbar({ connectedCount = 0, totalCount = 0, competition, select
 }
 
 Navbar.propTypes = {
-  connectedCount: PropTypes.number,
-  totalCount: PropTypes.number,
   competition: PropTypes.object,
   selectedEvent: PropTypes.object,
   onBack: PropTypes.func,

@@ -344,7 +344,7 @@ export function AllTeamsOverview({ teams, ecuList }) {
         return { ...prev, [teamId]: null }; // null = loading
       });
     }
-  }, [selectedTeamIds, ecuByTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTeamIds, ecuByTeamId]);
 
   // ── Chip interaction ──────────────────────────────────────────────────────
   function handleChipClick(teamId) {

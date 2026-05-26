@@ -4,23 +4,6 @@ import { Navbar } from './Navbar';
 
 vi.mock('../assets/evolocity_logo.png', () => ({ default: 'logo.png' }));
 
-describe('Navbar — health display', () => {
-  test('shows 100% health when no ECUs are registered', () => {
-    render(<Navbar connectedCount={0} totalCount={0} />);
-    expect(screen.getByText(/System Health: 100%/)).toBeInTheDocument();
-  });
-
-  test('calculates health percentage from connected vs total', () => {
-    render(<Navbar connectedCount={3} totalCount={4} />);
-    expect(screen.getByText(/System Health: 75%/)).toBeInTheDocument();
-  });
-
-  test('shows 0% when none are connected', () => {
-    render(<Navbar connectedCount={0} totalCount={5} />);
-    expect(screen.getByText(/System Health: 0%/)).toBeInTheDocument();
-  });
-});
-
 describe('Navbar — competition display', () => {
   test('shows competition name when provided', () => {
     render(<Navbar competition={{ name: 'Round 1', events: [] }} />);
