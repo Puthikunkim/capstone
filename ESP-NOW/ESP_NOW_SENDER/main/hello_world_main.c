@@ -159,15 +159,16 @@ typedef struct {
 } raw_sample_t;
 
 static raw_sample_t sample_ring[SAMPLE_RING_SIZE];
+static volatile bool current_channel_flag;
 static volatile uint16_t ring_write = 0;
 static volatile uint16_t ring_read  = 0;
 static SemaphoreHandle_t ring_mutex;
 
 //Sleep Mode
-#define SLEEP_VOLTAGE_THRESH_MV  200
-#define SLEEP_CURRENT_MAX_MA  1250
-#define SLEEP_CURRENT_MIN_MA 1200
-#define SLEEP_ENTRY_MS           30000
+#define SLEEP_VOLTAGE_THRESH_MV 200
+#define SLEEP_CURRENT_MAX_MA    1360
+#define SLEEP_CURRENT_MIN_MA    1120
+#define SLEEP_ENTRY_MS          30000
 
 static volatile bool modem_sleeping     = false;
 static int64_t       below_thresh_since = 0;
@@ -588,7 +589,7 @@ void adc_task(void *arg) {
             int raw_c_high, raw_c_low, raw_v, mv_c, mv_v;
             bool is_c_low;
             
-            //is_c_low = false;
+            is_c_low = true;
             ESP_ERROR_CHECK(adc_oneshot_read(
                 adc1_handle, ADC_CURRENT_LOW_CHANNEL, &raw_c_low));
             adc_cali_raw_to_voltage(adc1_cali_current_low, raw_c_low, &mv_c);
@@ -597,10 +598,10 @@ void adc_task(void *arg) {
                 ESP_ERROR_CHECK(adc_oneshot_read(
                     adc1_handle, ADC_CURRENT_HIGH_CHANNEL, &raw_c_high));
                 adc_cali_raw_to_voltage(adc1_cali_current_high, raw_c_high, &mv_c);
-                //is_c_low = true;
+                is_c_low = false;
             }
 
-            if (mv_v < 155) {
+            if (mv_v < 200) {
                 mv_v = 0;
             }
 
@@ -612,15 +613,21 @@ void adc_task(void *arg) {
                 adc1_handle, ADC_VOLTAGE_CHANNEL, &raw_v));
             adc_cali_raw_to_voltage(adc1_cali_voltage, raw_v, &mv_v);
 
-            int32_t real_current_ma = (int32_t)(mv_c * 5.58f - 6860);
+            int32_t real_current_ma = 0;
 
-            int32_t real_voltage_mv = (int32_t)(mv_v * 25);
+            if (is_c_low) {
+                //real_current_ma = (int32_t)(mv_c * 5.59f - 7099); //board 1
+                real_current_ma = (int32_t)(mv_c * 5.57f - 6792); //board 2
+            } else {
+                real_current_ma = (int32_t)(mv_c * 80.7f - 102649); //board 1 (2?)
+            }
 
-            // int32_t power_mw = (real_voltage_mv * real_current_ma) / 1000;
+            //int32_t real_voltage_mv = (int32_t)(mv_v * 25 - 967); //board 1
+            int32_t real_voltage_mv = (int32_t)(mv_v * 25 + 52); //board 2
 
-            //int32_t power_mw = ((int32_t)(mv_v * 25 + 264) * mv_c) / 1000;
-            // if (power_mw > power_threshold_mw) {
-            if (real_current_ma > power_threshold_mw) {   
+            int32_t power_mw = (real_voltage_mv * real_current_ma) / 1000;
+
+            if ((power_mw > power_threshold_mw) || (real_current_ma > 33000)) {  
                 if (!over_power_flag) {
                     over_power_flag     = true;
                     over_power_start_ms = now;
@@ -656,10 +663,11 @@ void adc_task(void *arg) {
             sample_ring[slot].voltage_mv = (int16_t)mv_v;
             sample_ring[slot].sampled_at = now;
             ring_write++;
+            current_channel_flag = is_c_low;
             xSemaphoreGive(ring_mutex);
 
-            bool low_activity = (mv_v < SLEEP_VOLTAGE_THRESH_MV &&
-                    SLEEP_CURRENT_MIN_MA < mv_c && mv_c < SLEEP_CURRENT_MAX_MA);
+            bool low_activity = ((mv_v < SLEEP_VOLTAGE_THRESH_MV) &&
+                    (SLEEP_CURRENT_MIN_MA < mv_c) && (mv_c < SLEEP_CURRENT_MAX_MA));
 
             if (low_activity) {
                 if (!modem_sleeping) {
@@ -696,6 +704,7 @@ void sender_task(void *arg) {
     int     sample_index = 0;
     int64_t now = 0;
     int64_t last_heartbeat_ms = 0;
+    bool c_low;
 
     ESP_LOGI(TAG, "Sender task started");
 
@@ -703,10 +712,17 @@ void sender_task(void *arg) {
         xSemaphoreTake(ring_mutex, portMAX_DELAY);
         while (ring_read != ring_write && sample_index < SAMPLES_PER_FRAME) {
             uint16_t slot = ring_read % SAMPLE_RING_SIZE;
-            current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv*5.58 - 6860);
+            c_low = current_channel_flag;
+            if (c_low) {
+                //current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv*5.59f - 7099); //board 1
+                current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv*5.57f - 6792); //board 2
+            } else {
+                current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv*80.7f - 102649);
+            }
             //current_buf[sample_index] = (uint32_t)(sample_ring[slot].current_mv);
             //voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv);
-            voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv * 25 );
+            //voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv * 25 - 977 ); //board 1
+            voltage_buf[sample_index] = (uint32_t)(sample_ring[slot].voltage_mv * 25 + 52 ); //board 2
             now = sample_ring[slot].sampled_at;
             sample_index++;
             ring_read++;
