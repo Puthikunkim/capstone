@@ -1,0 +1,34 @@
+{
+  "name": "evolocity-ecu-dashboard",
+  "description": "Browser-based real-time dashboard for EVolocity ECU energy data",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "prop-types": "^15.8.1",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-toastify": "^11.1.0",
+    "recharts": "^2.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^4.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react": "^7.0.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^15.0.0",
+    "jsdom": "^29.1.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
