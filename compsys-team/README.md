@@ -263,5 +263,5 @@ report for detail):
 - **`ARCHITECTURE.md`** (top level, alongside both repos) — full system
   walkthrough with sequence and state diagrams, including deep dives on time
   sync, the power limit, and the buzzer.
-- **`capstone-project-software-team-6`** — the FastAPI backend and React
+- **`software-team`** — the FastAPI backend and React
   dashboard that consume this firmware's data.
