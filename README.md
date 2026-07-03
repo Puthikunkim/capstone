@@ -24,8 +24,8 @@ cost.
 
 | Repository | What it contains | Stack |
 |-----------|------------------|-------|
-| [**capstone-project-compsys-team-6-1**](./capstone-project-compsys-team-6-1/README.md) | ESP32 firmware (sender + controller) and electrical / PCB design | C · ESP-IDF · FreeRTOS · ESP-NOW · Altium · LTspice |
-| [**capstone-project-software-team-6**](./capstone-project-software-team-6/README.md) | FastAPI backend, SQLite database, and React dashboard | Python 3.12 · FastAPI · SQLAlchemy · React 18 · Vite |
+| [**capstone-project-compsys-team-6-1**](./compsys-team/README.md) | ESP32 firmware (sender + controller) and electrical / PCB design | C · ESP-IDF · FreeRTOS · ESP-NOW · Altium · LTspice |
+| [**capstone-project-software-team-6**](./software-team/README.md) | FastAPI backend, SQLite database, and React dashboard | Python 3.12 · FastAPI · SQLAlchemy · React 18 · Vite |
 
 📖 **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — the full, diagram-rich walkthrough
 of how everything works end to end (read this for the deep dives on time sync, the
@@ -101,10 +101,10 @@ Each repo has full step-by-step instructions in its own README; here is the orde
 to bring the whole system up.
 
 1. **Firmware** — flash the controller and sender ESP32s (see the
-   [compsys README](./capstone-project-compsys-team-6-1/README.md#getting-started--build--flash)).
+   [compsys README](./compsys-team/README.md#getting-started--build--flash)).
 2. **Backend** — start FastAPI with `SERIAL_PORT` set to the controller's serial
    port (see the
-   [software README](./capstone-project-software-team-6/README.md#1-backend)).
+   [software README](./software-team/README.md#1-backend)).
 3. **Controller** — plug it in; it time-syncs with the backend over UART.
 4. **Senders** — power the vehicle ECUs; they register and begin streaming.
 5. **Frontend** — `npm run dev` and open <http://localhost:5173>.
