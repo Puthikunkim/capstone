@@ -1,214 +1,329 @@
-# EVolocity ECU Dashboard - Software Component
+# EVolocity ECU Dashboard — Software
 
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/IjV0HRak)
 
-Browser based real time dashboard for the EVolocity Control Unit (ECU) wireless data system.  
-The system wirelessly collects energy data from ESP32 based ECUs mounted on EVolocity vehicles and displays it live in a browser.
+Browser-based, real-time dashboard for the EVolocity Energy Control Unit (ECU)
+wireless telemetry system. The system collects battery **voltage**, **current**,
+and **power** data from ESP32-based ECUs on EVolocity race vehicles and displays
+it live in a browser — running entirely on a **local Windows laptop** with no
+internet connection or cloud services.
+
+This is the **software** component. The ESP32 firmware and electrical design live
+in the companion **compsys** repository (`capstone-project-compsys-team-6-1`). A
+full end-to-end walkthrough of both repositories — with diagrams — is in the
+top-level `ARCHITECTURE.md` alongside both repos.
 
 ---
 
-## Project Overview
+## Project overview
 
-Each EVolocity vehicle carries an ECU that records voltage, current, and energy data during racing. This software system:
+Each vehicle carries an ECU that samples voltage and current at 100 Hz. This
+software system:
 
-- Receives energy frames posted over HTTPS from one or more ESP32 boards.
-- Stores all readings to a local SQLite database by the ECU reported timestamp so out of order data flushed after a reconnection is stored correctly.
-- Pushes new readings to connected browser in real time using a WebSocket.
-- Provides a browser based dashboard where users can:
-  - View all registered ECUs with live **connected / disconnected** status.
-  - Select any ECU to view its real time and historical voltage, current, and energy data.
-  - Receive instant **power limit breach notifications** when an ECU exceeds its configured watt limit.
-  - **Configure ECU settings:** team number, vehicle class, vehicle type, and per ECU power limit.
-  - **Perform OTA firmware updates** on any ECU wirelessly, with live progress tracking.
-- Runs entirely on a **local Windows laptop** with no internet connection or cloud services.
+- **Ingests energy frames** arriving from the ESP32 controller over a USB/UART
+  serial link (parsed by `serial_reader.py`).
+- **Stores** every reading in a local SQLite database, keyed by the ECU-reported
+  timestamp, so data flushed out of order after a reconnection is stored
+  correctly.
+- **Broadcasts** new readings to connected browsers in real time over WebSockets.
+- Provides a browser dashboard where event administrators can:
+  - Create and manage **competitions**, **teams**, and **events**.
+  - View **live and historical** voltage / current / power per team and ECU.
+  - See **power-limit breach** notifications (warning → penalty) in real time.
+  - **Configure** each ECU (team number, vehicle class/type, power limit) — and
+    have the power limit pushed back down to the physical ECU.
+  - Track an **energy-efficiency leaderboard** and a **multi-team comparison**
+    view across all vehicles at once.
 
-**Milestone 1 requirements:**
-
-- [ ] ESP32 ADC reads voltage at ≥ 100 Hz and POSTs to the server via HTTPS.
-- [ ] Server receives and stores readings, broadcasts to frontend using a WebSocket.
-- [ ] Frontend graphs data in real time at ≥ 10 Hz.
-- [ ] Software connects to two ESP32 boards simultaneously, user can display data from either (one at a time).
-
----
-
-## Tech Stack
-
-| Layer              | Technology                 |
-| ------------------ | -------------------------- |
-| Backend server     | **Python + FastAPI**       |
-| Data persistence   | **SQLite + SQLAlchemy**    |
-| Data validation    | **Pydantic**               |
-| Frontend framework | **React**                  |
-| Charting           | **Recharts**               |
-| Communication      | **HTTPS POST + WebSocket** |
-
-> **Note on SQLite scalability:** SQLite is used in the prototype for simplicity. If the system needs to be extended, migrate to PostgreSQL.
+> **Note on transport.** Data reaches this backend over **ESP-NOW → UART serial**
+> (via the controller ESP32), *not* over Wi-Fi/HTTPS — a deliberate choice given
+> EVolocity's no-internet requirement. An HTTP `POST /api/data` endpoint also
+> exists and mirrors the same ingest path; it is used by the simulators and as a
+> fallback.
 
 ---
 
-## Communication Flow
+## Tech stack
 
-```text
-┌─────────────────────────┐        HTTPS POST /data         ┌────────────────────────────────┐
-│  ESP32 (ECU board #1)   │ ──────────────────────────────► │                                │
-└─────────────────────────┘       ≥ 100 Hz, JSON payload    │   FastAPI Backend (Python)     │
-                                                            │                                │
-┌─────────────────────────┐        HTTPS POST /data         │  • Validates payload (Pydantic)│
-│  ESP32 (ECU board #2)   │ ──────────────────────────────► │  • Persists to SQLite          │
-└─────────────────────────┘                                 │  • Broadcasts to client        │
-                                                            │                                │
-                                                            └──────────┬─────────────────────┘
-                                                                        │
-                                                           WebSocket /ws/{ecu_id}
-                                                           live JSON frames, ≥ 10 Hz
-                                                                        │
-                                                                        ▼
-                                                          ┌─────────────────────────┐
-                                                          │  React Frontend         │
-                                                          │  • ECU selector         │
-                                                          │  • Live Recharts graph  │
-                                                          │  • Status panel         │
-                                                          │  • Data table           │
-                                                          └─────────────────────────┘
+| Layer | Technology |
+|-------|------------|
+| Backend server | **Python 3.12 + FastAPI** (async, REST + WebSocket) |
+| Data persistence | **SQLite + SQLAlchemy 2.0** |
+| Data validation | **Pydantic** |
+| Serial bridge | **pyserial** (background thread → asyncio queue) |
+| Frontend framework | **React 18 + Vite** |
+| Charting | **Recharts** |
+| Notifications | **react-toastify** |
+| Live transport | **WebSocket** (server push) |
+
+All dependencies are free for commercial use (see `SBOM.md`). SQLite keeps all
+data on the operator's machine; migrate to PostgreSQL if the system is scaled.
+
+---
+
+## Communication flow
+
+```mermaid
+flowchart LR
+    ESP["Controller ESP32"] -->|"UART 115200<br/>JSON frames"| SR["serial_reader.py<br/>(background thread)"]
+    SR -->|"queue"| ING["ingest service<br/>persist + detect + broadcast"]
+    ING --> DB[("SQLite<br/>ecu_data.db")]
+    ING -->|"WebSocket push"| UI["React dashboard"]
+    UI -->|"HTTP REST<br/>config · history · scoring"| API["FastAPI :8000"]
+    API -->|"power limit<br/>(write queue → UART)"| ESP
+    API <--> DB
 ```
 
-**Request/Response shapes idea:**
+### Message shapes
 
-ESP32 POST body:
+**Serial packet (controller → `serial_reader.py`), one JSON line per packet:**
 
 ```json
 {
-  "ecu_serial": 12345,
-  "timestamp": "2026-03-10T09:00:00.000Z",
-  "sample_rate" : 100hz
-  "voltage": [3012, 3008, 3015.....]
-  "current": [2187, 2190, 2184....]
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "rx_time_ms": 123456,
+  "frames": [
+    {
+      "counter": 42,
+      "tx_time_ms": "2026-06-17T09:00:00.000000",
+      "voltage": [48210, 48190, 48205],
+      "current": [12500, 12480, 12510]
+    }
+  ]
 }
 ```
+(voltage/current are integer millivolts / milliamps — divided by 1000 on ingest.)
 
-WebSocket message pushed to browser:
+**Live frame pushed to the browser over WebSocket (`EnergyFrameResponse`):**
 
 ```json
 {
   "id": 1001,
   "ecu_id": 3,
-  "timestamp": "2026-03-10T09:00:00.000Z",
-  "avg_voltage": 48.2,
-  "avg_current": 12.5,
-  "energy": 0.603
+  "timestamp": "2026-06-17T09:00:00.000000",
+  "voltage_samples": [48.21, 48.19, 48.20],
+  "current_samples": [12.50, 12.48, 12.51],
+  "power_samples": [602.6, 601.4, 603.4],
+  "energy": 0.0
 }
+```
+
+**Power-limit downlink (backend → controller over UART):**
+
+```json
+{"type": "power_limit", "mac": "AA:BB:CC:DD:EE:FF", "power_limit_watts": 350.0}
 ```
 
 ---
 
-## Project Structure
+## Features
+
+| # | Feature | Where |
+|---|---------|-------|
+| 1 | Team & competition management | `routers/teams.py`, `routers/competitions.py` |
+| 2 | Historical race data per team | `GET /api/teams/{id}/frames`, `GET /api/ecu/{id}/history` |
+| 3 | Live telemetry (voltage / current / power) | WebSocket channels + `Dashboard.jsx` |
+| 4 | Power-limit breach detection & alerts | `services/penalties.py`, `/ws/violations` |
+| 5 | Energy-efficiency leaderboard | `services/scoring.py`, `LeaderboardPage.jsx` |
+| 6 | **Multi-team comparison dashboard** (team-designed) | `AllTeamsOverview.jsx`, `useMultiTeamWebSockets.js` |
+
+Power-limit detection runs in **two independent places**: the ESP32 sounds a
+local buzzer immediately, while the backend re-evaluates every frame to create
+persistent violation records and penalty times. Breaches ≤ 1 s are *warnings*
+(yellow); beyond 1 s they become *penalties* (red), matching the EVolocity
+rulebook.
+
+---
+
+## Project structure
 
 ```text
 capstone-project-software-team-6/
 ├── README.md
-├── SBOM.md
+├── SBOM.md                          Software bill of materials
 │
 ├── backend/                         Python + FastAPI server
-│   ├── main.py                      App entry point, mounts all routers, configures CORS, starts uvicorn
-│   ├── requirements.txt             Python package dependencies
-│   ├── .env.example                 Environment variable template
+│   ├── main.py                      App factory; registers routers, CORS, starts serial reader
+│   ├── serial_reader.py             UART bridge: reads frames, answers time sync, sends power limits
+│   ├── simulate_esp32*.py           Fake-ECU scripts (POST frames without hardware)
+│   ├── requirements.txt
+│   ├── .env.example
 │   └── app/
-│       ├── config.py                Centralised settings object (reads from .env)
-│       ├── database.py              SQLAlchemy engine, Base, and get_db() session dependency
-│       ├── models/
-│       │   ├── ecu.py               ORM model for ECU rows
-│       │   ├── energy_frame.py      ORM model for energy frame rows
-│       │   └── alert.py             ORM model for power limit breach event rows
-│       ├── routers/
-│       │   ├── data.py              Route to ingest frames and triggers breach detection and broadcast
-│       │   ├── ecu.py               Route to query ECUs
-│       │   ├── websocket.py         WebSocket to live stream to browser
-│       │   ├── alerts.py            Route to query power limit breach
-│       │   └── firmware.py          Route for OTA firmware update
-│       ├── schemas/
-│       │   ├── ecu.py               Pydantic shapes for ECU
-│       │   ├── energy_frame.py      Pydantic shapes for energy frames
-│       │   └── alert.py             Pydantic shapes for alert events
-│       └── services/
-│           ├── broadcast.py         Connection manager for WebSockets
-│           └── storage.py           DB access
-│   └── tests/
-│       ├── test_data.py             Unit tests for /data endpoint
-│       ├── test_ecu.py              Unit tests for ECU management endpoints
-│       ├── test_alerts.py           Unit tests for breach detection and alert endpoints
-│       └── test_firmware.py         Unit tests for OTA firmware update endpoints
+│       ├── config.py                Pydantic settings (reads .env)
+│       ├── database.py              SQLAlchemy engine, session, init_db()
+│       ├── models/                  ORM tables: ecu, energy_frame, team, competition,
+│       │                            event_participant, power_violation_event
+│       ├── schemas/                 Pydantic request/response models
+│       ├── services/                Business logic:
+│       │   ├── ingest.py            persist_and_broadcast_frame() — the ingest choke-point
+│       │   ├── storage.py           DB access (ECUs, frames, get-or-create by MAC)
+│       │   ├── processing.py        power = V × I per sample
+│       │   ├── penalties.py         power-violation lifecycle state machine
+│       │   ├── scoring.py           efficiency leaderboard / bracket scoring
+│       │   ├── broadcast.py         WebSocket ConnectionManager (pub/sub by channel)
+│       │   ├── teams.py, competitions.py, event_participants.py
+│       └── routers/                 HTTP + WebSocket endpoints:
+│           ├── ingest.py            POST /api/data (HTTP fallback)
+│           ├── ecu.py              ECU list/detail/configure/history
+│           ├── teams.py, competitions.py, event_participants.py
+│           ├── scoring.py, violations.py, firmware.py
+│           └── websocket.py         /ws/{ecu_id}, /ws/team/{id}, /ws/violations
+│   └── tests/                       pytest suite (in-memory SQLite, httpx ASGI client)
 │
-└── frontend/                        React browser app
-    ├── index.html
-    ├── package.json                 JS dependencies and npm scripts
-    ├── vite.config.js               Vite config
-    ├── .env.example                 Frontend env variable template
+└── frontend/                        React browser app (Vite)
+    ├── index.html, package.json, vite.config.js, .env.example
     └── src/
-        ├── main.jsx                 React DOM render root, mounts <App /> into root
-        ├── App.jsx                  Root component
+        ├── main.jsx, App.jsx        Root; state-driven navigation + global violation toasts
         ├── api/
-        │   ├── http.js              Fetch wrapper for HTTP REST calls
-        │   └── websocket.js         WebSocket client connection management
-        ├── components/
-        │   ├── EnergyChart.jsx      Live Recharts line chart
-        │   ├── ECUList.jsx          Display ECU connection states
-        │   ├── ECUSelector.jsx      Dropdown to switch the active ECU
-        │   ├── ECUStatusPanel.jsx   Panel for ECU status
-        │   ├── ConnectionStatus.jsx Badge: Display WebSocket state
-        │   ├── NotificationPanel.jsx Notifications for power limit breach alerts
-        │   └── DataTable.jsx        Scrollable table of recent frames
+        │   ├── http.js              REST wrapper (fetch)
+        │   └── websocket.js         WebSocketClient (auto-reconnect w/ backoff)
         ├── hooks/
-        │   ├── useWebSocket.js      Hook for WebSocket lifecycle
-        │   └── useECUData.js        Hook for REST fetch
-        └── pages/
-            ├── Dashboard.jsx        Main page
-            ├── Settings.jsx         Change ECU settings
-            └── FirmwareUpdate.jsx   OTA firmware upload with live progress tracking
+        │   ├── useWebSocket.js       useTeamWebSocket / useViolationsWebSocket
+        │   └── useMultiTeamWebSockets.js  one socket per team (Feature 6)
+        ├── pages/
+        │   ├── CompetitionsPage.jsx  Landing: competitions & teams
+        │   ├── Dashboard.jsx         Live charts, stats, ECU config, alerts
+        │   └── LeaderboardPage.jsx   Efficiency leaderboard + multi-team overview
+        └── components/               Charts, panels, modals, navbar, sidebar
 ```
 
 ---
 
-## GitHub Workflow
+## Getting started
 
-### Rules
+### Prerequisites
 
-- **Never push directly to `main`.** All changes must arrive using a reviewed and approved pull request.
-- **Branch from `main`** every time you start a new feature or bug fix.
-- **Branch naming:** use descriptive, lowercase, hyphen-separated names that indicate the work being done, e.g.:
-  - `feature/websocket-broadcast`
-- **Commit and push frequently** while working. Do not wait until a feature is complete before pushing.
-- **Pull from `main` often** to keep your branch up to date and minimise merge conflicts.
+- **Python 3.12+**
+- **Node.js 18+** and **npm**
+- (Optional) the controller ESP32 on a USB serial port, for live data.
 
-### Pull Request Process
+### 1. Backend
 
-1. Push your branch and open a pull request on GitHub.
-2. Give the PR a short, descriptive title summarising the change
-3. Use the PR body to explain _what_ changed and _why_ (link to any relevant issue or task).
-4. Request a review from at least one other team member.
-5. The reviewer leaves comments on specific lines or the overall PR. Address all comments with new commits.
-6. Once the reviewer approves, merge the PR using the "Squash and merge" or "Merge commit" strategy (strategy we need to agree on).
-7. Delete the branch after merging to keep the repository tidy.
+```bash
+cd backend
+python -m venv .venv
+# Windows PowerShell:  .venv\Scripts\Activate.ps1
+# macOS/Linux:         source .venv/bin/activate
+pip install -r requirements.txt
 
-### Commit Message Convention
-
-Use the conventional commits format for consistency:
-
-```text
-<type>: <short summary>
-
-type = feat | fix | test | chore | docs | refactor
+cp .env.example .env        # then edit .env (see below)
+python main.py              # serves on http://localhost:8000 (auto-reload)
 ```
 
-Examples:
+Key `.env` settings:
 
-- `feat: add POST /data endpoint`
-- `fix: handle WebSocket disconnect without crashing`
+```ini
+HOST=0.0.0.0
+PORT=8000
+DATABASE_URL=sqlite:///./backend/ecu_data.db
+ALLOWED_ORIGINS=http://localhost:5173
+# Set this to the controller ESP32's serial port to enable live data:
+SERIAL_PORT=            # e.g. COM5 (Windows) or /dev/ttyUSB0 (Linux)
+SERIAL_BAUD=115200
+# Optional TLS (leave blank for plain HTTP):
+TLS_CERT_PATH=
+TLS_KEY_PATH=
+```
 
-## Contributors
+If `SERIAL_PORT` is left blank, the backend runs normally with the serial reader
+disabled — useful for development and tests.
 
-| Name | GitHub |
-| ---- | ------ |
-| Jerry Kim | [@Puthikunkim](https://github.com/Puthikunkim) |
-| Shihoo Park | [@shewho1119](https://github.com/shewho1119) |
-| Ajith Penmatsa | [@Ajith05105](https://github.com/Ajith05105) |
-| Oshan Premkumar | [@OshanNZ](https://github.com/OshanNZ) / [@OshanpNZ](https://github.com/OshanpNZ) |
+### 2. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev                 # serves on http://localhost:5173
+```
+
+Open <http://localhost:5173>. The frontend talks to the backend at
+`http://localhost:8000`.
+
+### 3. Running without hardware (simulators)
+
+With the backend running, feed it fake ECU data over HTTP:
+
+```bash
+cd backend
+python simulate_esp32.py        # and simulate_esp32-2.py, -3.py, -4.py for more ECUs
+```
+
+### 4. Running with hardware
+
+Flash and power the ESP32s (see the compsys repo README), set `SERIAL_PORT` to
+the controller's port, then start the backend **before** powering the ECUs so the
+controller can complete its UART time-sync handshake. Bring-up order:
+
+1. Start the backend (with `SERIAL_PORT` set).
+2. Plug in the controller ESP32 → it time-syncs over UART.
+3. Power the sender ECU(s) → they register and stream.
+4. Start the frontend and open the dashboard.
+
+### Tests, lint & build
+
+```bash
+# Backend
+cd backend && pytest                 # unit tests (in-memory SQLite)
+flake8 .                             # lint
+
+# Frontend
+cd frontend
+npm test                             # Vitest
+npm run lint                         # ESLint
+npm run build                        # production build check
+```
+
+---
+
+## API surface (summary)
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/data` | HTTP ingest fallback (mirrors the serial path) |
+| `GET /api/ecu/` · `/{id}` | list ECUs · one ECU's config & status |
+| `POST /api/ecu/{id}/configure` | update settings **and push power limit to the device** |
+| `GET /api/ecu/{id}/history` | stored frames (time / `before` / limit filters) |
+| `GET/POST /api/teams/…` · `…/competitions/…` | team & competition management |
+| `POST /api/teams/{id}/assign/{ecu_id}` | bind an ECU to a team |
+| `…/event-participants/…` | per-team event entry (race start + duration) |
+| `GET /api/scoring/event-leaderboard/{id}` | efficiency leaderboard |
+| `GET /api/violations/` | power-violation history |
+| `…/firmware/…` | OTA upload / download / status (server side) |
+| `WS /ws/{ecu_id}` · `/ws/team/{id}` · `/ws/violations` | live push channels |
+
+---
+
+## Development workflow & CI
+
+- **Never push directly to `main`.** Branch from `main`, open a pull request,
+  request at least one review, address comments, then squash-and-merge and delete
+  the branch.
+- **Branch names:** descriptive, lowercase, hyphenated — e.g.
+  `feature/websocket-broadcast`.
+- **Commit messages:** conventional commits — `feat:`, `fix:`, `test:`, `chore:`,
+  `docs:`, `refactor:`.
+- **CI (GitHub Actions) on every PR:** Markdown lint, broken-link check, backend
+  lint + `pytest` (Python 3.12, in-memory SQLite), frontend ESLint + Vite build,
+  and frontend Vitest.
+
+---
+
+## Roadmap
+
+- **On-device OTA** — the server-side OTA endpoints (upload, checksum, download,
+  progress tracking) are implemented; the ESP32-side receive-and-flash logic is
+  the outstanding piece (see the compsys repo roadmap).
+- **Public-facing live portal** — a read-only channel for teams/spectators to
+  follow telemetry on their own devices; the WebSocket architecture already
+  supports it.
+- Scoring was extended after the demo deadline to support a live open-window mode
+  (start-only participants ranked over `[start, now]`, capped at one hour).
+
+---
+
+## Related documentation
+
+- **`ARCHITECTURE.md`** (top level, alongside both repos) — full system
+  walkthrough with sequence, state, and ER diagrams.
+- **`capstone-project-compsys-team-6-1`** — the ESP32 firmware and electrical
+  design that produce this data.
