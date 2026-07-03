@@ -135,8 +135,8 @@ No hardware? Run the backend without `SERIAL_PORT` and use the
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — end-to-end technical walkthrough with
   diagrams.
-- [compsys README](./capstone-project-compsys-team-6-1/README.md) — firmware &
+- [compsys README](./compsys-team/README.md) — firmware &
   electrical: build, flash, calibration, ESP-NOW protocol.
-- [software README](./capstone-project-software-team-6/README.md) — backend &
+- [software README](./software-team/README.md) — backend &
   frontend: setup, API, features, CI.
 
