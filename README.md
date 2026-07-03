@@ -24,8 +24,8 @@ cost.
 
 | Repository | What it contains | Stack |
 |-----------|------------------|-------|
-| [**capstone-project-compsys-team-6-1**](./compsys-team/README.md) | ESP32 firmware (sender + controller) and electrical / PCB design | C · ESP-IDF · FreeRTOS · ESP-NOW · Altium · LTspice |
-| [**capstone-project-software-team-6**](./software-team/README.md) | FastAPI backend, SQLite database, and React dashboard | Python 3.12 · FastAPI · SQLAlchemy · React 18 · Vite |
+| [**compsys-team**](./compsys-team/README.md) | ESP32 firmware (sender + controller) and electrical / PCB design | C · ESP-IDF · FreeRTOS · ESP-NOW · Altium · LTspice |
+| [**software-team**](./software-team/README.md) | FastAPI backend, SQLite database, and React dashboard | Python 3.12 · FastAPI · SQLAlchemy · React 18 · Vite |
 
 📖 **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — the full, diagram-rich walkthrough
 of how everything works end to end (read this for the deep dives on time sync, the
@@ -81,14 +81,14 @@ capstone/
 ├── README.md                          ← you are here (umbrella overview)
 ├── ARCHITECTURE.md                    ← full end-to-end technical walkthrough
 │
-├── capstone-project-compsys-team-6-1/
+├── compsys-team/
 │   ├── ESP-NOW/ESP_NOW_SENDER/        Sender firmware (on each vehicle)
 │   ├── ESP-NOW/ESP-NOW/               Controller firmware (on the laptop)
 │   ├── Task1_ADC/                     Early ADC experiment
 │   ├── LTSPICE/                       Circuit simulations
 │   └── ProjectResource/               Datasheets, Altium files, spec, lectures
 │
-└── capstone-project-software-team-6/
+└── software-team/
     ├── backend/                       FastAPI + serial reader + SQLite
     └── frontend/                      React + Vite dashboard
 ```
