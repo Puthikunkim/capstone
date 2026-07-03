@@ -9,7 +9,7 @@ it live in a browser — running entirely on a **local Windows laptop** with no
 internet connection or cloud services.
 
 This is the **software** component. The ESP32 firmware and electrical design live
-in the companion **compsys** repository (`capstone-project-compsys-team-6-1`). A
+in the companion **compsys** repository (`compsys-team`). A
 full end-to-end walkthrough of both repositories — with diagrams — is in the
 top-level `ARCHITECTURE.md` alongside both repos.
 
@@ -138,7 +138,7 @@ rulebook.
 ## Project structure
 
 ```text
-capstone-project-software-team-6/
+software-team/
 ├── README.md
 ├── SBOM.md                          Software bill of materials
 │
@@ -325,5 +325,5 @@ npm run build                        # production build check
 
 - **`ARCHITECTURE.md`** (top level, alongside both repos) — full system
   walkthrough with sequence, state, and ER diagrams.
-- **`capstone-project-compsys-team-6-1`** — the ESP32 firmware and electrical
+- **`compsys-team`** — the ESP32 firmware and electrical
   design that produce this data.
