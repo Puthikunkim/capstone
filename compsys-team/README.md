@@ -10,7 +10,7 @@ over a custom ESP-NOW radio protocol.
 This repository holds the **Computer Systems** (ESP32 firmware) and
 **Electrical** (PCB / circuit) work. The browser dashboard and server that
 consume this data live in the separate **software** repository
-(`capstone-project-software-team-6`). A full end-to-end walkthrough of both
+(`software-team`). A full end-to-end walkthrough of both
 repositories — with diagrams — is in the top-level `ARCHITECTURE.md` that sits
 alongside both repos.
 
